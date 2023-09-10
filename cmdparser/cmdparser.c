@@ -72,15 +72,15 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
         case ARGP_KEY_ARG:
             arguments->image = arg;
             for (int i = state->next; i < state->argc; i++) {
-                arguments->args[arguments->args_count++] = state->argv[i];  
+                arguments->container_argv[arguments->container_argc++] = state->argv[i];  
             }
-            arguments->args[arguments->args_count] = NULL;
+            arguments->container_argv[arguments->container_argc] = NULL;
     }
     return 0;
 }
 
 int docker_run_cmd_check(struct docker_run_arguments *a) {
-    if (a->image == NULL || (a->cpu != -1 && a->cpu < 1000) || (a->memory != -1 && a->memory == 0) || a->args_count < 1) {
+    if (a->image == NULL || (a->cpu != -1 && a->cpu < 1000) || (a->memory != -1 && a->memory == 0) || a->container_argc < 1) {
         return 0;
     }
     return 1;
@@ -96,9 +96,9 @@ void docker_run_cmd_print(struct docker_run_arguments *a) {
     for (int i = 0; i < a->volume_cnt; i++) {
         printf("host_vol:%s, container_vol:%s\n", a->volume[i].key, a->volume[i].val);
     }
-    printf("args_count=%d\n", a->args_count);
-    for (int i = 0; a->args[i]; i++) {
-        printf("%s ", a->args[i]);
+    printf("args_count=%d\n", a->container_argc);
+    for (int i = 0; a->container_argv[i]; i++) {
+        printf("%s ", a->container_argv[i]);
     }
     puts("");
 }
@@ -160,22 +160,22 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     char *action = argv[1];
     if (strcmp(action, "run") == 0) {
         struct argp docker_run_argp = {docker_run_option_setting, docker_run_parse_func, docker_run_doc, NULL};
-        struct docker_run_arguments arguments = {
-            .args_count=1,
-            .volume = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair)),
-            .image=NULL,
-            .cpu = -1,
-            .memory = -1,
-            .args_count=0,
-            .args = malloc(128 * sizeof(char *))
-        };
-        argp_parse(&docker_run_argp, argc - 1, argv + 1, ARGP_IN_ORDER | ARGP_NO_ERRS, 0, &arguments);
+        struct docker_run_arguments *arguments = (struct docker_run_arguments *) malloc(sizeof(struct docker_run_arguments));
+        arguments->container_argc=1;
+        arguments->volume = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair));
+        arguments->image = NULL;
+        arguments->cpu = -1;
+        arguments->memory = -1;
+        arguments->container_argc = 0;
+        arguments->container_argv = malloc(128 * sizeof(char *));
+
+        argp_parse(&docker_run_argp, argc - 1, argv + 1, ARGP_IN_ORDER | ARGP_NO_ERRS, 0, arguments);
         //docker_run_cmd_print(&arguments);
-        if (!docker_run_cmd_check(&arguments)) {
+        if (!docker_run_cmd_check(arguments)) {
             print_cmd_help(&docker_run_argp);
             exit(-1);
         }
-        struct docker_cmd result = {.cmd_type=DOCKER_RUN, .arguments=&arguments};
+        struct docker_cmd result = {.cmd_type=DOCKER_RUN, .arguments=arguments};
         return result;
     }
 

@@ -6,11 +6,13 @@
 
 int main(int argc, char **argv)
 {
-
     struct docker_cmd result = parse_docker_cmd(argc, argv);
     if (result.cmd_type == DOCKER_RUN) {
-        struct docker_run_arguments *a = result.arguments;
-        run(a->tty, a->image, a->args);
+        //docker_run_cmd_print(result.arguments);
+        docker_run(result.arguments);
     }
     return 0;
 }
+
+
+

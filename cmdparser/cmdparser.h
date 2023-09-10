@@ -27,8 +27,8 @@ struct docker_run_arguments {
     int cpu;
     int memory;
     char *image;
-    int args_count;
-    char **args; // arg0 arg1 ... arg127
+    int container_argc;
+    char **container_argv; // arg0 arg1 ... arg127
 };
 
 struct docker_exec_arguments {
@@ -43,5 +43,6 @@ struct docker_exec_arguments {
 
 
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]);
+void docker_run_cmd_print(struct docker_run_arguments *a);
 
 #endif /* __CMD_PARSER_H__ */

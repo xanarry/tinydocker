@@ -1,7 +1,9 @@
 #ifndef container_h
 #define container_h
 
+#include "../cmdparser/cmdparser.h"
+
 int init();
-int run();
+int docker_run(struct docker_run_arguments *args);
 
 #endif
