@@ -27,6 +27,7 @@ struct docker_run_arguments {
     int cpu;
     int memory;
     char *image;
+    char *name;
     int container_argc;
     char **container_argv; // arg0 arg1 ... arg127
 };

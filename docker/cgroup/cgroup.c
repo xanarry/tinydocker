@@ -21,7 +21,7 @@ int init_cgroup(char *container_name, char *cgroup_path) {
         return 0;
     }
 
-    int ret = mkpath(cgroup_path);
+    int ret = make_path(cgroup_path);
     if (ret == -1) {
         log_error("init cgroup error, failed to create %s", cgroup_path);
     }

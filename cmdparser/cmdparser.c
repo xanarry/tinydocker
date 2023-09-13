@@ -2,6 +2,7 @@
 #include <argp.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "cmdparser.h"
 
 
@@ -39,6 +40,7 @@ char *docker_run_doc = "Usage:  tinydocker run [OPTIONS] IMAGE [COMMAND] [ARG...
 struct argp_option docker_run_option_setting[] = {	
     //{"--长参数", "-缩写参数", '提示值: --file=提示值', "flag", "说明文档" }
     { "volume",      'v', "k:v", 0, "设置卷" },
+    { "name",        'n', "str", 0, "容器名字"},
     { "interactive", 'i', "false|true", OPTION_ARG_OPTIONAL, "开启交互模式" },
     { "tty",         't', "false|true", OPTION_ARG_OPTIONAL, "开启tty" },
     { "cpu-shares",  'c', "int_val", 0, "设置cpu限制, 必须大于1000" },
@@ -69,6 +71,9 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
         case 'm':
             arguments->memory = atoi(arg);
             break;
+        case 'n':
+            arguments->name =arg;
+            break;
         case ARGP_KEY_ARG:
             arguments->image = arg;
             for (int i = state->next; i < state->argc; i++) {
@@ -93,6 +98,7 @@ void docker_run_cmd_print(struct docker_run_arguments *a) {
     printf("cpu=%d\n", a->cpu);
     printf("memory=%d\n", a->memory);
     printf("image=%s\n", a->image);
+    printf("name=%s\n", a->name);
     for (int i = 0; i < a->volume_cnt; i++) {
         printf("host_vol:%s, container_vol:%s\n", a->volume[i].key, a->volume[i].val);
     }
@@ -164,10 +170,12 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         arguments->container_argc=1;
         arguments->volume = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair));
         arguments->image = NULL;
+        arguments->name = malloc(128 * sizeof(char *));
         arguments->cpu = -1;
         arguments->memory = -1;
         arguments->container_argc = 0;
         arguments->container_argv = malloc(128 * sizeof(char *));
+        sprintf(arguments->name, "%ld", time(NULL)); //默认容器名字使用当前的时间戳
 
         argp_parse(&docker_run_argp, argc - 1, argv + 1, ARGP_IN_ORDER | ARGP_NO_ERRS, 0, arguments);
         //docker_run_cmd_print(&arguments);
