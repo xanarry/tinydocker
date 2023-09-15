@@ -13,6 +13,12 @@ struct key_val_pair {
     char *val;
 };
 
+struct volume_config {
+    char host[50]; //主机路径
+    char container[50]; //容器路径
+    int ro; //只读:1, 读写:0, 错误配置:-1
+};
+
 struct docker_cmd {
     enum docker_command_type cmd_type;
     void *arguments;
@@ -21,7 +27,7 @@ struct docker_cmd {
 struct docker_run_arguments {
     //Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
     int volume_cnt;
-    struct key_val_pair *volume;
+    struct volume_config *volumes;
     int interactive;
     int tty;
     int cpu;

@@ -1,5 +1,5 @@
-#ifndef container_h
-#define container_h
+#ifndef CONTAINER_H
+#define CONTAINER_H
 
 #include "../cmdparser/cmdparser.h"
 

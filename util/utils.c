@@ -89,9 +89,10 @@ char* calculate_sha256(const char* file_path) {
 }
 
 
-int folder_exist(char *folder) {
-    struct stat sb;
-    return (stat(folder, &sb) == 0 && S_ISDIR(sb.st_mode)) ? 1 : 0;
+int path_exist(const char *path) {
+    if (access(path, F_OK) == 0)
+        return 1;
+    return 0;
 }
 
 
@@ -120,13 +121,20 @@ int make_path(const char *dir) {
     for (p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = 0;
-            if (!folder_exist(tmp) && mkdir(tmp, S_IRWXU) == -1) {
+            if (!path_exist(tmp) && mkdir(tmp, S_IRWXU) == -1) {
                 return -1;
             }
             *p = '/';
         }
     }
-    return  folder_exist(tmp) ? 0 : mkdir(tmp, S_IRWXU);
+    return path_exist(tmp) ? 0 : mkdir(tmp, S_IRWXU);
+}
+
+int is_folder(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+        return 1;
+    return 0;
 }
 
 

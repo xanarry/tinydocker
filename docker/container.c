@@ -1,21 +1,18 @@
 #define _GNU_SOURCE
-#include <sys/mount.h>
-#include <unistd.h>
-#include <stdlib.h>
+#include <errno.h>
 #include <sched.h>
-#include <sys/syscall.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/wait.h>
-#include <errno.h>
 #include <string.h>
+#include <sys/mount.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
-#include <errno.h>
-#include "container.h"
-#include "../cmdparser/cmdparser.h"
 #include "../logger/log.h"
-#include "cgroup/cgroup.h"
 #include "../util/utils.h"
+#include "cgroup.h"
+#include "container.h"
+#include "volumes.h"
 
 extern char **environ;
 
@@ -30,8 +27,8 @@ int init_and_set_new_root(char *new_root) {
         return -1;
     }
 
-     /* 保证'new_root'是一个独立挂载点*/
-    if (mount(new_root, new_root, NULL, MS_BIND, NULL) == -1) {
+    /* 保证'new_root'是一个独立挂载点, 如果有挂载卷在new_root, 这里务必加上MS_REC参数递归挂载挂载的卷目录, 否则容器里面看不到内容*/
+    if (mount(new_root, new_root, NULL, MS_REC | MS_BIND, NULL) == -1) {
         log_error("mount %s as new point error: %s", new_root, strerror(errno));
     }
     log_info("finish --bind mount '%s' to %s", new_root, new_root);
@@ -42,7 +39,7 @@ int init_and_set_new_root(char *new_root) {
         new_root[slen - 1] = 0;
     }
     sprintf(old_root, "%s/%s", new_root, "old_root");
-    if (!folder_exist(old_root)) {
+    if (!path_exist(old_root)) {
         if (make_path(old_root) == -1) {
             log_error("failed to create old_root: %s", old_root);
             return -1;
@@ -72,7 +69,7 @@ int init_and_set_new_root(char *new_root) {
     }
 
     //检查proc目录挂载进程信息
-    if (!folder_exist("/proc"))
+    if (!path_exist("/proc"))
         make_path("/proc");
 
     if (mount("proc", "/proc", "proc", MS_NOEXEC|MS_NOSUID|MS_NODEV, NULL) == -1) {
@@ -87,7 +84,7 @@ int init_and_set_new_root(char *new_root) {
 int create_readonly_layer(char *image, char *readonly_dir) {
     // 传入的镜像就是一个目录, 直接使用
     log_info("create_readonly_layer %s", image);
-    if (folder_exist(image)) {
+    if (is_folder(image)) {
         sprintf(readonly_dir, "%s", image);
         return 0;
     }
@@ -98,14 +95,13 @@ int create_readonly_layer(char *image, char *readonly_dir) {
     sprintf(readonly_dir, "%s/images/%s", TINYDOCKER_RUNTIME_DIR, image_hash);
 
     //如果传入的tar包已经解压到镜像目录, 直接复用
-    if (folder_exist(readonly_dir)) {
+    if (path_exist(readonly_dir)) {
         return 0;
     }
 
     make_path(readonly_dir); //创建镜像目录, 并且解压tar包
     return extract_tar(image, readonly_dir);
 }
-
 
 //创建读写层, 即overlayfs的upperdir
 int create_readwrite_layer(char *container_name, char *readwrite_dir) {
@@ -123,12 +119,12 @@ int create_workespace_mount_point(char *container_name, char *lowerdir, char *up
     if (make_path(workdir) != 0) {
         return -1;
     }
+    
     //mount -t overlay overlay -o lowerdir=lower,upperdir=upper,workdir=worker_dir overlay_dir/
     char data[512] = {0};
     sprintf(data, "lowerdir=%s,upperdir=%s,workdir=%s", lowerdir, upperdir, workdir);
-    return mount("overlay", mountpoint, "overlay", MS_MGC_VAL, data);
+    return mount("overlay", mountpoint, "overlay", MS_REC, data);
 }
-
 
 
 int init_container_workerspace(struct docker_run_arguments *args, char *mountpoint) {
@@ -187,8 +183,12 @@ int docker_run(struct docker_run_arguments *args) {
         log_error("failed to init_container_workerspace");
         return -1;
     }
-    log_info("create overlay filesystem: %s", mountpoint);
+    log_info("create overlay filesystem mountpoint: %s", mountpoint);
     args->image = mountpoint;
+
+    if (mount_volumes(mountpoint, args->volume_cnt, args->volumes) == -1) {
+        return -1;
+    }
 
 
     char cgroup_path[256] = {0};
@@ -238,24 +238,28 @@ int docker_run(struct docker_run_arguments *args) {
 
     log_info("main exit");
 
-    //umount工作目录
-    char work_dir[256] = {0};
-    sprintf(work_dir, "%s/containers/%s/mountpoint", TINYDOCKER_RUNTIME_DIR, args->name);
-    umount(work_dir);
-    log_info("finish unmount container mountpoint %s", work_dir);
-
-    //清理工作目录
-    memset(work_dir, 0, 256);
-    sprintf(work_dir, "%s/containers/%s", TINYDOCKER_RUNTIME_DIR, args->name);
-    if (remove_dir(work_dir) == -1) {
-        log_info("clean container %s work dir error", work_dir);
-    }
-    log_info("finish clean container work dir: %s", work_dir);
-
     //删除cgroup文件
     if (rmdir(cgroup_path) != 0) {
         log_error("failed remove cgroup: %s", cgroup_path);
         perror("failed remove cgroup");
     }
     log_info("finish clean cgroup %s", cgroup_path);
+
+    //umount 挂载的卷
+    umount_volumes(mountpoint, args->volume_cnt, args->volumes);
+    log_info("finish unmount mounted volumes");
+
+    //umount 容器跟目录挂载点
+    umount(mountpoint);
+    log_info("finish unmount container mountpoint %s", mountpoint);
+
+    //清理容器工作目录
+    char container_dir[256] = {0};
+    sprintf(container_dir, "%s/containers/%s", TINYDOCKER_RUNTIME_DIR, args->name);
+    if (remove_dir(container_dir) == -1) {
+        log_error("clean container %s work dir error", container_dir);
+    }
+    log_info("finish clean container dir: %s", container_dir);
+    
+    return 0;
 }

@@ -21,12 +21,13 @@ struct key_val_pair parse_key_val_pair(char *str) {
     return pair;
 }
 
-
 // 打印帮助信息
 void print_cmd_help(const struct argp *argp) {
-    printf("%s\n", argp->args_doc);
-    for (const struct argp_option *opt = argp->options; opt->name != NULL; opt++) {
-        printf("  -%c, --%s  %s\n", opt->key, opt->name, opt->doc);
+    if (argp->args_doc != NULL) {
+        printf("%s\n", argp->args_doc);
+    }
+    for (const struct argp_option *opt = argp->options; opt != NULL; opt++) {
+        printf("  -%c, --%s  %s\n", opt->key, opt->name != NULL ? opt->name : "unknown", opt->doc != NULL ? opt->doc : "unknown");
     }
     printf("\n");
 }
@@ -48,6 +49,33 @@ struct argp_option docker_run_option_setting[] = {
     { 0 }
 };
 
+struct volume_config parse_volume_config(char* input) {
+    struct volume_config result;
+    result.ro = 0; //默认为读写挂载
+    char* token;
+    int i = 0;
+
+    // 使用strtok函数分割字符串
+    token = strtok(input, ":");
+    while (token != NULL) {
+        if (i == 0) {
+            strcpy(result.host, token);
+        } else if (i == 1) {
+            strcpy(result.container, token);
+        } else if (i == 2) { // 指定了挂载模式, 且为只读
+            result.ro = strcmp(token, "ro") == 0;
+        }
+        token = strtok(NULL, ":");
+        i++;
+    }
+
+    // 如果输入的字符串只有a和b，将c设为空字符串
+    if (i < 2) {
+        result.ro = -1;
+    }
+    return result;
+}
+
 //参数解析函数
 static error_t docker_run_parse_func(int key, char *arg, struct argp_state *state) {
     struct docker_run_arguments *arguments = state->input;
@@ -57,7 +85,13 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
 
     switch (key) {
         case 'v':
-            arguments->volume[arguments->volume_cnt++] = parse_key_val_pair(arg);
+            struct volume_config vol = parse_volume_config(arg);
+            if (vol.ro == -1) {
+                printf("卷参数配置错误, 请使用: host_dir:container_dir:ro|rw 的形式\n");
+                print_cmd_help(state->root_argp);
+                exit(-1);
+            }
+            arguments->volumes[arguments->volume_cnt++] = vol;
             break;
         case 'i':
             arguments->interactive = 1;
@@ -100,7 +134,7 @@ void docker_run_cmd_print(struct docker_run_arguments *a) {
     printf("image=%s\n", a->image);
     printf("name=%s\n", a->name);
     for (int i = 0; i < a->volume_cnt; i++) {
-        printf("host_vol:%s, container_vol:%s\n", a->volume[i].key, a->volume[i].val);
+        printf("host_dir:%s, container_dir:%s, ro:%d\n", a->volumes[i].host, a->volumes[i].container, a->volumes[i].ro);
     }
     printf("args_count=%d\n", a->container_argc);
     for (int i = 0; a->container_argv[i]; i++) {
@@ -168,7 +202,7 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         struct argp docker_run_argp = {docker_run_option_setting, docker_run_parse_func, docker_run_doc, NULL};
         struct docker_run_arguments *arguments = (struct docker_run_arguments *) malloc(sizeof(struct docker_run_arguments));
         arguments->container_argc=1;
-        arguments->volume = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair));
+        arguments->volumes = (struct volume_config *) malloc(128 * sizeof(struct volume_config));
         arguments->image = NULL;
         arguments->name = malloc(128 * sizeof(char *));
         arguments->cpu = -1;

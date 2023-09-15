@@ -2,22 +2,21 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <fcntl.h>
 #include <string.h>
 #include <errno.h>
-#include "../../util/utils.h"
-#include "../../logger/log.h"
+#include "../util/utils.h"
+#include "../logger/log.h"
 
 static char *cgroup_base = "/sys/fs/cgroup/system.slice";
 
 int init_cgroup(char *container_name, char *cgroup_path) {
-    if (!folder_exist(cgroup_base)) {
+    if (!path_exist(cgroup_base)) {
         log_error("cgroup_base: %s not exists", cgroup_base);
         return -1;
     }
    
     sprintf(cgroup_path, "%s/cdocker-%s", cgroup_base, container_name);
-    if (folder_exist(cgroup_path)) {
+    if (path_exist(cgroup_path)) {
         return 0;
     }
 

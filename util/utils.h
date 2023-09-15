@@ -1,9 +1,11 @@
 #ifndef utils_h
 #define utils_h
 
-int folder_exist(char *folder);
+int path_exist(const char *path);
 
 int make_path(const char *dir);
+
+int is_folder(const char *path);
 
 char** split_string(char* input);
 
