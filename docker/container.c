@@ -350,3 +350,15 @@ int docker_ps(struct docker_ps_arguments *args) {
          spans[2], info_list[i].command, spans[3], info_list[i].created, spans[4], info_list[i].status, spans[5], info_list[i].name);
     }
 }
+
+int docker_top(struct docker_top_arguments *args) {
+    char pid_list[4094];
+    if (get_container_processes_id(args->container_name, pid_list) == -1) {
+        log_error("failed to get container process list");
+        return -1;
+    }
+    char cmd[5000] = {0};
+    sprintf(cmd, "ps -f -p %s", pid_list);
+    log_info("cmd: %s", cmd);
+    system(cmd);
+}

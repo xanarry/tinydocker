@@ -53,6 +53,11 @@ struct docker_ps_arguments {
 };
 
 
+struct docker_top_arguments {
+    char *container_name;
+};
+
+
 struct docker_exec_arguments {
     //Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
     int detach;

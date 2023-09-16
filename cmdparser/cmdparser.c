@@ -207,6 +207,12 @@ void docker_ps_cmd_print(struct docker_ps_arguments *a) {
     printf("list_all=%d\n", a->list_all);
 }
 
+
+// ==============================docker top===========================
+void docker_top_cmd_print(struct docker_top_arguments *a) {
+    printf("container=%s\n", a->container_name);
+}
+
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     if (argc < 2) {
         printf("请输入有效的docker命令\n");
@@ -268,6 +274,19 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
             exit(-1);
         }
         struct docker_cmd result = {.cmd_type=DOCKER_PS, .arguments=arguments};
+        return result;
+    }
+
+    if (strcmp(action, "top") == 0) {
+        struct docker_top_arguments *arguments = (struct docker_top_arguments *) malloc(sizeof(struct docker_top_arguments));
+        arguments->container_name = NULL;
+        if (argc == 3) {
+            arguments->container_name = argv[argc - 1];
+        } else {
+            printf("Usage:  docker top CONTAINER [ps OPTIONS]\n");
+            exit(-1);
+        }
+        struct docker_cmd result = {.cmd_type=DOCKER_TOP, .arguments=arguments};
         return result;
     }
 

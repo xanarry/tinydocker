@@ -30,4 +30,6 @@ int docker_commit(struct docker_commit_arguments *args);
 
 int docker_ps(struct docker_ps_arguments *args);
 
+int docker_top(struct docker_top_arguments *args);
+
 #endif

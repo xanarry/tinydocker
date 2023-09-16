@@ -140,3 +140,29 @@ int set_cgroup_limits(char *cgroup_path, int cpu, int memory, char *cpuset) {
 
     return 0;
 }
+
+int get_container_processes_id(char *container_name, char *pid_list) {
+    char cgroup_procs_path[1024] = {0};
+    sprintf(cgroup_procs_path, "%s/cdocker-%s/%s", cgroup_base, container_name, "cgroup.procs");
+    if (!path_exist(cgroup_procs_path)) {
+        log_error("can not find container by name: %s", container_name);
+        return -1;
+    }
+
+    FILE *file = fopen(cgroup_procs_path, "r");
+    if (file == NULL) {
+        log_error("failed to open the file: %s", cgroup_procs_path);
+        return -1;
+    }
+
+    char line[32];
+    strcpy(pid_list, "");  // 清空结果字符串
+    while (fgets(line, sizeof(line), file)) {
+        strtok(line, "\n");  // 去除行尾的换行符
+        strcat(pid_list, line);
+        strcat(pid_list, " ");
+    }
+
+    fclose(file);
+    return 0;
+}

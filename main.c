@@ -21,6 +21,10 @@ int main(int argc, char **argv)
         print_docker_cmds(result);
         docker_ps(result.arguments);
         break;
+    case DOCKER_TOP:
+        print_docker_cmds(result);
+        docker_top(result.arguments);
+        break;
     }
 
     return 0;
