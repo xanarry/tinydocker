@@ -15,6 +15,7 @@
 #include <openssl/evp.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include "utils.h"
 #include "../logger/log.h"
 
 
@@ -192,3 +193,10 @@ int extract_tar(const char* tar_file, const char* extract_dir) {
     return system(cmd);
 }
 
+
+void timestamp_to_string(time_t timestamp, char *buffer, size_t buffer_size) {
+    struct tm *timeinfo;
+    timeinfo = localtime(&timestamp);
+
+    strftime(buffer, buffer_size, "%Y-%m-%d %H:%M:%S", timeinfo);
+}

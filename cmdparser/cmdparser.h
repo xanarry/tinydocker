@@ -4,9 +4,10 @@
 enum docker_command_type {
     DOCKER_RUN,
     DOCKER_COMMIT,
-    DOCKER_STOP,
-    DOCKER_EXEC,
     DOCKER_PS,
+    DOCKER_TOP,
+    DOCKER_EXEC,
+    DOCKER_STOP,
 };
 
 struct key_val_pair {
@@ -37,6 +38,7 @@ struct docker_run_arguments {
     char *name;
     int container_argc;
     char **container_argv; // arg0 arg1 ... arg127
+    char *mountpoint; //运行时辅助参数
 };
 
 
@@ -45,6 +47,10 @@ struct docker_commit_arguments {
     char *tar_path;
 };
 
+
+struct docker_ps_arguments {
+    int list_all;
+};
 
 
 struct docker_exec_arguments {

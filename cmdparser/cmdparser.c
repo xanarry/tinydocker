@@ -202,6 +202,10 @@ void docker_commit_cmd_print(struct docker_commit_arguments *a) {
 }
 
 
+// ==============================docker ps===========================
+void docker_ps_cmd_print(struct docker_ps_arguments *a) {
+    printf("list_all=%d\n", a->list_all);
+}
 
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     if (argc < 2) {
@@ -251,6 +255,21 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         return result;
     }
 
+     if (strcmp(action, "ps") == 0) {
+       //docker ps -a(可选项)
+        struct docker_ps_arguments *arguments = (struct docker_ps_arguments *) malloc(sizeof(struct docker_ps_arguments));
+        arguments->list_all = 0;
+        if (argc == 3) {
+            if (strcmp(argv[2], "-a") == 0) {
+                arguments->list_all = 1;
+            }
+        } else if (argc != 2) {
+            printf("Usage:  docker ps [OPTIONS]\n");
+            exit(-1);
+        }
+        struct docker_cmd result = {.cmd_type=DOCKER_PS, .arguments=arguments};
+        return result;
+    }
 
     if (strcmp(action, "exec") == 0) {
         struct argp docker_exec_argp = {docker_exec_option_setting, docker_exec_parse_func, docker_exec_doc, NULL};
@@ -277,6 +296,9 @@ void print_docker_cmds(struct docker_cmd cmds) {
         break;
     case DOCKER_COMMIT:
         docker_commit_cmd_print(cmds.arguments);
+        break;
+    case DOCKER_PS:
+        docker_ps_cmd_print(cmds.arguments);
         break;
     case DOCKER_EXEC:
         docker_exec_cmd_print(cmds.arguments);

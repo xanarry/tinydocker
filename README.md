@@ -7,3 +7,4 @@ v3.0            Version 3.0, 支持容器新的设置根目录, 设置方式是�
 v4.0            Version 4.0, 支持容器overlayfs, 容器里面的变更不再影响挂载的根目录, 支持tar包作为镜像地址(即运行根目录)
 v5.0            Version 5.0, 支持卷挂载(支持挂载多个卷, 支持为卷设置只读|读写特性) 测试命令: make && sudo ./tinydocker run -i -t  -v /home/xanarry/Downloads/busybox-1.36.0/scripts:rw_dir -v /home/xanarry/Downloads/busybox-1.36.0/include:ro_dir:ro /home/xanarry/Downloads/busybox.tar.xz /bin/sh
 v6.0            Version 6.0, 支持docker commit, 将容器当前工作状态打包到tar文件
+v7.0            Version 7.0, 支持docker ps, 列出运行容器或者全部容器(参数-a)

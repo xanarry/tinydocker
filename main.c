@@ -16,7 +16,13 @@ int main(int argc, char **argv)
     case DOCKER_COMMIT:
         print_docker_cmds(result);
         docker_commit(result.arguments);
+        break;
+    case DOCKER_PS:
+        print_docker_cmds(result);
+        docker_ps(result.arguments);
+        break;
     }
+
     return 0;
 }
 

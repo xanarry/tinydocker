@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mount.h>
-#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include "../logger/log.h"
@@ -13,141 +12,159 @@
 #include "cgroup.h"
 #include "container.h"
 #include "volumes.h"
+#include "workspace.h"
+#include <limits.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 extern char **environ;
 
-//设置容器新的根目录
-int init_and_set_new_root(char *new_root) {
-    /* Ensure that 'new_root' and its parent mount don't have shared propagation (which would cause pivot_root() to
-       return an error), and prevent propagation of mount events to the initial mount namespace. 
-       保证new_root与它的父挂载点没有共享传播属性, 否则调用pivot_root会报错
-       */
-    if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) == -1) {
-        log_error("set / mount point as private error: %s", strerror(errno));
+int write_container_info(char *container_id, char *image, char *command, int created, enum container_status status, char *name) {
+    char container_info_dir[512] = {0};
+    sprintf(container_info_dir, "%s/container_info", TINYDOCKER_RUNTIME_DIR);
+    if (!path_exist(container_info_dir)) {
+        make_path(container_info_dir);
+    }
+    
+    strcat(strcat(container_info_dir, "/"), container_id);
+    int fd = open(container_info_dir, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1) {
+        log_error("failed to open file: %s", container_info_dir);
+        return 1;
+    }
+
+    char str_created_time[20] = {0};
+    timestamp_to_string(created, str_created_time, 20);
+    char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
+
+    // 使用额外128的缓冲记录结构信息
+    ssize_t size = 128 + strlen(container_id) + strlen(image) + strlen(command) + strlen(str_created_time) + strlen(name);
+    char *content = (char *) malloc(sizeof(char) * size);
+    sprintf(content, "container_id=%s\nimage=%s\ncommand=%s\ncreated=%s\nstatus=%s\nname=%s\n", container_id, image, command, str_created_time, str_status[status], name);
+    
+    if (write(fd, content, strlen(content)) == -1) {
+        perror("Failed to write to file");
+        close(fd);
+        return 1;
+    }
+    close(fd);
+    log_info("write container info %s in to %s", content, container_info_dir);
+    return 0;
+}
+
+int read_container_info(const char *container_info_file, struct container_info *info) {
+    FILE *file = fopen(container_info_file, "r");
+    if (file == NULL) {
+        log_error("failed to open container info file: %s", container_info_file);
         return -1;
     }
 
-    /* 保证'new_root'是一个独立挂载点, 如果有挂载卷在new_root, 这里务必加上MS_REC参数递归挂载挂载的卷目录, 否则容器里面看不到内容*/
-    if (mount(new_root, new_root, NULL, MS_REC | MS_BIND, NULL) == -1) {
-        log_error("mount %s as new point error: %s", new_root, strerror(errno));
-    }
-    log_info("finish --bind mount '%s' to %s", new_root, new_root);
+    char line[1024];
+    while (fgets(line, sizeof(line), file) != NULL) {
+        // Remove newline character from the end of the line
+        line[strcspn(line, "\n")] = '\0';
 
-    char old_root[256] = {0};
-    int slen = strlen(new_root);
-    if (new_root[slen - 1] == '/') {
-        new_root[slen - 1] = 0;
-    }
-    sprintf(old_root, "%s/%s", new_root, "old_root");
-    if (!path_exist(old_root)) {
-        if (make_path(old_root) == -1) {
-            log_error("failed to create old_root: %s", old_root);
-            return -1;
+        // Split the line into key and value
+        char *key = strtok(line, "=");
+        char *value = strtok(NULL, "=");
+
+        if (strcmp(key, "container_id") == 0) {
+            strcpy(info->container_id, value);
+        }
+        if (strcmp(key, "image") == 0) {
+            strcpy(info->image, value);
+        }
+        if (strcmp(key, "command") == 0) {
+            strcpy(info->command, value);
+        }
+        if (strcmp(key, "created") == 0) {
+            strcpy(info->created, value);
+        }
+        if (strcmp(key, "status") == 0) {
+            strcpy(info->status, value);
+        }
+        if (strcmp(key, "name") == 0) {
+            strcpy(info->name, value);
         }
     }
-
-    log_info("set new root as: %s, old_root save to: %s", new_root, old_root);
-
-    if (syscall(SYS_pivot_root, new_root, old_root) != 0) {
-        log_error("SYS_pivot_root new: %s, old: %s error: %s", new_root, old_root, strerror(errno));
-        return -1;
-    }
-
-    chdir("/");
-
-    // 卸载老的root
-    char old_new[100] = "/old_root";
-    int ret = umount2(old_new, MNT_DETACH);
-    if (ret != 0) {
-        log_error("failed to umount old_root: %s", old_root);
-        return ret;
-    }
-
-    if (remove_dir(old_new) == -1) {
-        log_info("failed to remove old root dir");
-        return -1;
-    }
-
-    //检查proc目录挂载进程信息
-    if (!path_exist("/proc"))
-        make_path("/proc");
-
-    if (mount("proc", "/proc", "proc", MS_NOEXEC|MS_NOSUID|MS_NODEV, NULL) == -1) {
-        perror("mount proc error");
-        return -1;
-    }
+    fclose(file);
     return 0;
 }
 
 
-//创建只读层, 即镜像目录
-int create_readonly_layer(char *image, char *readonly_dir) {
-    // 传入的镜像就是一个目录, 直接使用
-    log_info("create_readonly_layer %s", image);
-    if (is_folder(image)) {
-        sprintf(readonly_dir, "%s", image);
-        return 0;
-    }
-
-    //假定传入的都是tar文件, 解压到指定的目录
-    char *image_hash = calculate_sha256(image);
-    log_info("imageg hash:%s", image_hash);
-    sprintf(readonly_dir, "%s/images/%s", TINYDOCKER_RUNTIME_DIR, image_hash);
-
-    //如果传入的tar包已经解压到镜像目录, 直接复用
-    if (path_exist(readonly_dir)) {
-        return 0;
-    }
-
-    make_path(readonly_dir); //创建镜像目录, 并且解压tar包
-    return extract_tar(image, readonly_dir);
-}
-
-//创建读写层, 即overlayfs的upperdir
-int create_readwrite_layer(char *container_name, char *readwrite_dir) {
-    sprintf(readwrite_dir, "%s/containers/%s/upperdir", TINYDOCKER_RUNTIME_DIR, container_name);
-    
-    int t = make_path(readwrite_dir);
-    log_info("create_readwrite_layer %s", readwrite_dir);
-    return t;
-}
-
-//创建挂载点, 即容器实际的工作目录
-int create_workespace_mount_point(char *container_name, char *lowerdir, char *upperdir, char *mountpoint) {
-    char workdir[128] = {0};
-    sprintf(workdir, "%s/containers/%s/workdir", TINYDOCKER_RUNTIME_DIR, container_name);     
-    if (make_path(workdir) != 0) {
-        return -1;
+int update_container_info(char *container_id, enum container_status status) {
+    char container_info_dir[512] = {0};
+    sprintf(container_info_dir, "%s/container_info", TINYDOCKER_RUNTIME_DIR);
+    if (!path_exist(container_info_dir)) {
+        make_path(container_info_dir);
     }
     
-    //mount -t overlay overlay -o lowerdir=lower,upperdir=upper,workdir=worker_dir overlay_dir/
-    char data[512] = {0};
-    sprintf(data, "lowerdir=%s,upperdir=%s,workdir=%s", lowerdir, upperdir, workdir);
-    return mount("overlay", mountpoint, "overlay", MS_REC, data);
+    strcat(strcat(container_info_dir, "/"), container_id);
+    struct container_info info;
+    read_container_info(container_info_dir, &info);
+
+
+    int fd = open(container_info_dir, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1) {
+        log_error("failed to open file: %s", container_info_dir);
+        return 1;
+    }
+
+    char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
+    // 使用额外128的缓冲记录结构信息
+    ssize_t size = 128 + strlen(info.container_id) + strlen(info.image) + strlen(info.command) + strlen(info.created) + strlen(info.name);
+    char *content = (char *) malloc(sizeof(char) * size);
+    sprintf(content, "container_id=%s\nimage=%s\ncommand=%s\ncreated=%s\nstatus=%s\nname=%s\n", info.container_id, info.image, info.command, info.created, str_status[status], info.name);
+    
+    if (write(fd, content, strlen(content)) == -1) {
+        perror("Failed to write to file");
+        close(fd);
+        return 1;
+    }
+    close(fd);
+    log_info("update container info %s in to %s", content, container_info_dir);
+    return 0;
 }
 
-
-int init_container_workerspace(struct docker_run_arguments *args, char *mountpoint) {
-    // 如果是文件夹, 直接用这个文件作为只读层, 否则检查镜像是不是tar包, 然后解压
-    char *readonly_dir = (char *) malloc(128 * sizeof(char));
-    if (create_readonly_layer(args->image, readonly_dir) != 0) {
+int list_containers_info(struct container_info *container_info_list) {
+    char container_info_dir[512] = {0};
+    sprintf(container_info_dir, "%s/container_info", TINYDOCKER_RUNTIME_DIR);
+    DIR *dir = opendir(container_info_dir);
+    if (dir == NULL) {
+        log_error("failed to open directory: %s", container_info_dir);
         return -1;
     }
-    log_info("readonly_dir=%s", readonly_dir);
 
-    char *readwrite_dir = (char *) malloc(128 * sizeof(char));
-    if (create_readwrite_layer(args->name, readwrite_dir) != 0) {
-        return -1;
+    int container_cnt = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip "." and ".." directories
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        // Construct the absolute path of the file
+        char file_path[PATH_MAX];
+        snprintf(file_path, sizeof(file_path), "%s/%s", container_info_dir, entry->d_name);
+
+        // Check if the entry is a file
+        struct stat file_stat;
+        if (stat(file_path, &file_stat) == 0 && S_ISREG(file_stat.st_mode)) {
+            log_info("load container info from: %s", file_path);
+
+            struct container_info info;
+            int ret = read_container_info(file_path, &info);
+            if (ret == -1) {
+                log_info("failed to load container info from: %s", file_path);
+                continue;
+            }
+            container_info_list[container_cnt++] = info;
+        }
     }
-    log_info("readwrite_dir=%s", readwrite_dir);
 
-    sprintf(mountpoint, "%s/containers/%s/mountpoint", TINYDOCKER_RUNTIME_DIR, args->name);
-    if (make_path(mountpoint) != 0) {
-        return -1;
-    }
-    log_info("mountpoint=%s", mountpoint);
-
-    return create_workespace_mount_point(args->name, readonly_dir, readwrite_dir, mountpoint);
+    closedir(dir);
+    return container_cnt;
 }
 
 
@@ -157,7 +174,7 @@ int pipe_fd[2];
 int child_fn(void *args) {
     struct docker_run_arguments *run_args = (struct docker_run_arguments *) args;
     log_info("start init inner process");
-    if (init_and_set_new_root(run_args->image) != 0) {
+    if (init_and_set_new_root(run_args->mountpoint) != 0) {
         log_error("init docker error");
         exit(-1);
     }
@@ -184,7 +201,7 @@ int docker_run(struct docker_run_arguments *args) {
         return -1;
     }
     log_info("create overlay filesystem mountpoint: %s", mountpoint);
-    args->image = mountpoint;
+    args->mountpoint = mountpoint;
 
     if (mount_volumes(mountpoint, args->volume_cnt, args->volumes) == -1) {
         return -1;
@@ -217,6 +234,11 @@ int docker_run(struct docker_run_arguments *args) {
     log_info("docker process pid=%d", child_pid);
 
 
+    int now = time(NULL);
+    char container_id[64] = {0};
+    sprintf(container_id, "%d", now);
+    write_container_info(container_id, args->image, args->container_argv[0], now, CONTAINER_RUNNING, args->name);
+
     //应用cgroup限制
     if (apply_cgroup_limit_to_pid(cgroup_path, child_pid) != 0) {
         log_error("failed apply_cgroup_limit_to_pid");
@@ -236,7 +258,8 @@ int docker_run(struct docker_run_arguments *args) {
         perror("waitpid");
     }
 
-    log_info("main exit");
+    log_info("container process exit");
+    update_container_info(container_id, CONTAINER_EXITED);
 
     //删除cgroup文件
     if (rmdir(cgroup_path) != 0) {
@@ -287,4 +310,43 @@ int docker_commit(struct docker_commit_arguments *args) {
     }
 
     return 0;
+}
+
+
+int docker_ps(struct docker_ps_arguments *args) {
+    struct container_info info_list[128];
+    int cnt = list_containers_info(info_list);
+    char *titles[] = {"CONTAINER ID", "IMAGE", "COMMAND", "CREATED", "STATUS", "NAMES", NULL};
+    int spans[6] =   {12,              5,       7,         7,         6,        5}; //记录每个字段输出的最大宽度, 与titles一一对应
+    for (int i = 0; i < cnt; i++) {
+        if (args->list_all == 0 && strcmp(info_list[i].status, "RUNNING") != 0) {
+            continue;
+        }
+        ssize_t container_id_len = strlen(info_list[i].container_id);
+        spans[0] = container_id_len > spans[0] ? container_id_len : spans[0];
+
+        ssize_t image_len = strlen(info_list[i].image);
+        spans[1] = image_len > spans[1] ? image_len : spans[1];
+
+        ssize_t command_len = strlen(info_list[i].command);
+        spans[2] = command_len > spans[2] ? command_len : spans[2];
+
+        spans[3] = 19; //2023-12-12 12:12:12这样的形式, 固定19长度
+        spans[4] = 7; //RUNING|STOPPING|EXITED, 最长7
+
+        ssize_t name_len = strlen(info_list[i].name);
+        spans[5] = name_len > spans[5] ? name_len : spans[5];
+    }
+
+    for (int i = 0; titles[i] != NULL; i++) {
+        printf("%-*s\t", spans[i], titles[i]);
+    }
+    printf("\n");
+    for (int i = 0; i < cnt; i++) {
+        if (args->list_all == 0 && strcmp(info_list[i].status, "RUNNING") != 0) {
+            continue;
+        }
+        printf("%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\n", spans[0], info_list[i].container_id, spans[1], info_list[i].image, \
+         spans[2], info_list[i].command, spans[3], info_list[i].created, spans[4], info_list[i].status, spans[5], info_list[i].name);
+    }
 }
