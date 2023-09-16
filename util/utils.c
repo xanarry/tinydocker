@@ -175,11 +175,13 @@ char** split_string(char* input) {
     return result;
 }
 
-int create_tar(char *pathname, char *tarpath) {
-    char cmd[258] = {0};
-    sprintf(cmd, "tar -cf %s %s", tarpath, pathname);
+int create_tar(char *dir, char *tar_path) {
+    char cmd[512] = {0};
+    sprintf(cmd, "tar -czf %s -C %s .", tar_path, dir);
     log_info("%s", cmd);
-    return system(cmd);
+    int t = system(cmd);
+    printf("%d\n", t);
+    return t;
 }
 
 

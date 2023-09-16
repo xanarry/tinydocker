@@ -263,3 +263,28 @@ int docker_run(struct docker_run_arguments *args) {
     
     return 0;
 }
+
+
+
+int docker_commit(struct docker_commit_arguments *args) {
+    // 检查容器是否存在
+    char container_mountpoint[512] = {0};
+    sprintf(container_mountpoint, "%s/containers/%s/mountpoint", TINYDOCKER_RUNTIME_DIR, args->container_name);
+    if (path_exist(container_mountpoint) == 0) {
+        log_error("container is not exists: %s", args->container_name);
+        return -1;
+    }
+    
+    char tar_path[512] ={0};
+    if (args->tar_path == NULL) {
+        sprintf(tar_path, "%s.tar", args->container_name);
+        args->tar_path = tar_path;
+    }
+
+    if (create_tar(container_mountpoint, args->tar_path) != 0) {
+        log_error("failed to commit container: %s", args->container_name);
+        return -1;
+    }
+
+    return 0;
+}

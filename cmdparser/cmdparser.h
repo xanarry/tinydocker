@@ -3,6 +3,7 @@
 
 enum docker_command_type {
     DOCKER_RUN,
+    DOCKER_COMMIT,
     DOCKER_STOP,
     DOCKER_EXEC,
     DOCKER_PS,
@@ -38,6 +39,14 @@ struct docker_run_arguments {
     char **container_argv; // arg0 arg1 ... arg127
 };
 
+
+struct docker_commit_arguments {
+    char *container_name;
+    char *tar_path;
+};
+
+
+
 struct docker_exec_arguments {
     //Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
     int detach;
@@ -50,6 +59,7 @@ struct docker_exec_arguments {
 
 
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]);
-void docker_run_cmd_print(struct docker_run_arguments *a);
+void print_docker_cmds(struct docker_cmd);
+
 
 #endif /* __CMD_PARSER_H__ */

@@ -5,7 +5,6 @@
 #include <time.h>
 #include "cmdparser.h"
 
-
 struct key_val_pair parse_key_val_pair(char *str) {
     struct key_val_pair pair = {NULL, NULL};
 
@@ -26,7 +25,7 @@ void print_cmd_help(const struct argp *argp) {
     if (argp->args_doc != NULL) {
         printf("%s\n", argp->args_doc);
     }
-    for (const struct argp_option *opt = argp->options; opt != NULL; opt++) {
+    for (const struct argp_option *opt = argp->options; opt != NULL && opt->name; opt++) {
         printf("  -%c, --%s  %s\n", opt->key, opt->name != NULL ? opt->name : "unknown", opt->doc != NULL ? opt->doc : "unknown");
     }
     printf("\n");
@@ -196,7 +195,19 @@ void docker_exec_cmd_print(struct docker_exec_arguments *a) {
 
 
 
+// ==============================docker commit===========================
+void docker_commit_cmd_print(struct docker_commit_arguments *a) {
+    printf("container_name=%s\n", a->container_name);
+    printf("tar_path=%s\n", a->tar_path != NULL ? a->tar_path : "");
+}
+
+
+
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("请输入有效的docker命令\n");
+        exit(-1);
+    }
     char *action = argv[1];
     if (strcmp(action, "run") == 0) {
         struct argp docker_run_argp = {docker_run_option_setting, docker_run_parse_func, docker_run_doc, NULL};
@@ -221,6 +232,25 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         return result;
     }
 
+    if (strcmp(action, "commit") == 0) {
+        //docker commit container_name path(可选项)
+        struct docker_commit_arguments *arguments = (struct docker_commit_arguments *) malloc(sizeof(struct docker_commit_arguments));
+        arguments->container_name = NULL;
+        arguments->tar_path = NULL; 
+
+        if (argc == 3) {
+            arguments->container_name = argv[2];
+        } else if (argc == 4) {
+            arguments->container_name = argv[2];
+            arguments->tar_path = argv[3];
+        } else {
+            printf("Usage:  docker commit [OPTIONS] CONTAINER [REPOSITORY[:TAG]]\n");
+            exit(-1);
+        }
+        struct docker_cmd result = {.cmd_type=DOCKER_COMMIT, .arguments=arguments};
+        return result;
+    }
+
 
     if (strcmp(action, "exec") == 0) {
         struct argp docker_exec_argp = {docker_exec_option_setting, docker_exec_parse_func, docker_exec_doc, NULL};
@@ -233,5 +263,23 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         //print_cmd_help(&docker_exec_argp);
         struct docker_cmd result = {.cmd_type=DOCKER_EXEC, .arguments=&arguments};
         return result;
+    }
+}
+
+
+
+
+void print_docker_cmds(struct docker_cmd cmds) {
+    switch (cmds.cmd_type)
+    {
+    case DOCKER_RUN:
+        docker_run_cmd_print(cmds.arguments);
+        break;
+    case DOCKER_COMMIT:
+        docker_commit_cmd_print(cmds.arguments);
+        break;
+    case DOCKER_EXEC:
+        docker_exec_cmd_print(cmds.arguments);
+        break;
     }
 }
