@@ -207,18 +207,15 @@ int docker_run(struct docker_run_arguments *args) {
         return -1;
     }
 
-
-    char cgroup_path[256] = {0};
-    int ret = init_cgroup(args->name, cgroup_path); //创建一个test容器
+    int ret = init_cgroup(args->name); //创建一个test容器
     if (ret != 0) {
         perror("failed to init cgroup");
         return ret;
     }
-    log_info("using cgroup %s", cgroup_path);
 
     // 注意这里cpu和mem如果设置的太小, 容器可能起不来, cpu最小要求1000, 也就是1%, mem测试能起来的最小值是204800
-    if (set_cgroup_limits(cgroup_path, args->cpu, args->memory, NULL) != 0) {
-        log_error("failed to set_cgroup_limits in %s", cgroup_path);
+    if (set_cgroup_limits(args->name, args->cpu, args->memory, NULL) != 0) {
+        log_error("failed to set_cgroup_limits for %s", args->name);
         return -1; 
     }
     log_info("set_cgroup_limits cpu=%d, mem=%d", args->cpu, args->memory);
@@ -227,6 +224,7 @@ int docker_run(struct docker_run_arguments *args) {
     if (pipe(pipe_fd) == -1)
         return -1;
 
+    // 这里不要加CLONE_NEWUSER, 否则会导致pivot_root权限不足, 
     pid_t child_pid = clone(child_fn, child_stack+(8 * 1024 * 1024), CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWIPC | SIGCHLD, args);
     if (child_pid == -1) {
         perror("clone subprocess error");
@@ -240,7 +238,7 @@ int docker_run(struct docker_run_arguments *args) {
     write_container_info(container_id, args->image, args->container_argv[0], now, CONTAINER_RUNNING, args->name);
 
     //应用cgroup限制
-    if (apply_cgroup_limit_to_pid(cgroup_path, child_pid) != 0) {
+    if (apply_cgroup_limit_to_pid(args->name, child_pid) != 0) {
         log_error("failed apply_cgroup_limit_to_pid");
         return -1;
     }
@@ -262,11 +260,11 @@ int docker_run(struct docker_run_arguments *args) {
     update_container_info(container_id, CONTAINER_EXITED);
 
     //删除cgroup文件
-    if (rmdir(cgroup_path) != 0) {
-        log_error("failed remove cgroup: %s", cgroup_path);
+    if (remove_cgroup(args->name) != 0) {
+        log_error("failed remove cgroup: %s", args->name);
         perror("failed remove cgroup");
     }
-    log_info("finish clean cgroup %s", cgroup_path);
+    log_info("finish clean cgroup %s", args->name);
 
     //umount 挂载的卷
     umount_volumes(mountpoint, args->volume_cnt, args->volumes);
@@ -352,13 +350,176 @@ int docker_ps(struct docker_ps_arguments *args) {
 }
 
 int docker_top(struct docker_top_arguments *args) {
-    char pid_list[4094];
-    if (get_container_processes_id(args->container_name, pid_list) == -1) {
+    int pid_list[4096];
+    int pid_cnt = get_container_processes_id(args->container_name, pid_list);
+    if (pid_cnt == -1) {
         log_error("failed to get container process list");
         return -1;
     }
-    char cmd[5000] = {0};
-    sprintf(cmd, "ps -f -p %s", pid_list);
+
+    char *pid_str_list = (char *) malloc (sizeof(char *) * pid_cnt * 32);
+    strcpy(pid_str_list, "");  // 清空结果字符串
+    char str_pid[64];
+    for (int i = 0; i < pid_cnt; i++) {
+        printf("%d\n", pid_list[i]);
+        strcpy(str_pid, "");  // 清空结果字符串
+        sprintf(str_pid, "%d", pid_list[i]);
+        strcat(pid_str_list, str_pid);
+        strcat(pid_str_list, " ");
+    }
+
+    char *cmd = (char *) malloc (sizeof(char *) * (strlen(pid_str_list) + 32));
+    sprintf(cmd, "ps -f -p %s", pid_str_list);
     log_info("cmd: %s", cmd);
+    int ret = system(cmd);
+
+    free(pid_str_list);
+    free(cmd);
+    return ret;
+}
+
+
+int docker_exec(struct docker_exec_arguments *args) {
+    int current_pid = getpid();
+    // 获取当前进程的cgroup路径， 用户还原父进程的cgroup, 否则当前运行进程也加入到了容器内部的cgroup
+    char *cgroup_files[64];
+    int cgroup_file_cnt = get_cgroup_files(current_pid, cgroup_files, 64);
+    if (cgroup_file_cnt < 0) {
+        log_error("failed to get current prcess cgroup, pid=%d", current_pid);
+        exit(-1);
+    }
+
+    //启动第一个进程用来在启动用户程序后户还原当前exec进程本身的cgroup
+    int pipe_fd[2];
+    pipe(pipe_fd);
+    int pid = fork();
+    if (pid < 0) {
+        exit(-1);
+    } else if (pid == 0) {
+        close(pipe_fd[1]);
+        char read_buf[128] = {0};
+        int len = read(pipe_fd[0], read_buf, 128); //如果父进程处理遇到错误会直接退出关闭管道，然后这里读的数据就是0，需要特殊处理
+        log_info("cgroup help prcess get message: %s, message_len: %d", read_buf, len);
+        //移除父进程的cgroup
+        if (len > 0) {
+            if (write_pid_to_cgroup_procs(current_pid, "/sys/fs/cgroup/user.slice/user-1000.slice/session-2.scope/cgroup.procs") == -1) {
+                log_error("failed to moved out docker exec pid %d from new cgroup setting", current_pid);
+            } else {
+                log_info("docker exec pid %d moved out from new cgroup setting", current_pid);
+            }
+        }
+        log_info("parrent process exit, exit myself, pid=%d", current_pid);
+        exit(0);
+    }
+
+    // 先设置cgroup好让子进程继承, 不然在绑定了命名空间后会提示找不到cgroup文件
+    if (apply_cgroup_limit_to_pid(args->container_name, current_pid) == -1) {
+        log_error("failed to set cgroup limits");
+        exit(-1);
+    }
+
+    // 找出目标容器中的一个进程ID, 该进程用来寻找ns文件
+    int pid_list[4096];
+    int pid_cnt = get_container_processes_id(args->container_name, pid_list);
+    if (pid_cnt <= 0) {
+        log_error("failed to get container process list");
+        return -1;
+    }
+    int one_pid = pid_list[0];
+
+    //设置当前主进程的命名空间    
+    //CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWIPC
+    char ns_file[1024];
+    char *ns_typs[] = {"ipc", "uts", "net", "pid", "mnt", NULL}; 
+    for (int i = 0; ns_typs[i] != NULL; i++) {
+        // /proc/25032/ns/
+        strcpy(ns_file, ""); //清空字符串
+        sprintf(ns_file, "/proc/%d/ns/%s", one_pid, ns_typs[i]);
+        int fd = open(ns_file, O_RDONLY | O_CLOEXEC);
+        if (fd == -1 || setns(fd, 0) == -1) { // Join that namespace 
+            log_error("failed to join current process to destinct %s ns", ns_typs[i]);
+            exit(-1);
+        }
+        close(fd);
+    }
+    
+    // 创建一个子进程运行用户程序
+    pid = fork();
+    if (pid < 0) {
+        log_error("failed to create subprocess");
+        exit(1);
+    } else if (pid == 0) { //子进程
+        printf("run %s\n", args->container_argv[0]);
+        if (execv(args->container_argv[0], args->container_argv) == -1) {  //Execute a command in namespace 
+            log_error("failed to run cmd: %s", args->container_argv[0]);
+        }
+        exit(0);
+    } else { // 父进程
+        close(pipe_fd[0]);
+        char buf[100] = "remove_crgroup";
+        write(pipe_fd[1], buf, strlen(buf));
+        close(pipe_fd[1]);
+
+        if (args->detach == 0) {
+            log_info("docker exec waiting user command to finish now, user cmd pid=%d", pid);
+            waitpid(pid, NULL, 0);  // 等待子进程结束
+        }
+        log_info("docker exec finished");
+    }
+
+    return 0;
+}
+
+
+
+
+int docker_exec1(struct docker_exec_arguments *args) {
+    int current_pid = getpid();
+    char cmd[1000] = {0};
+    sprintf(cmd, "cat /proc/%d/cgroup", current_pid);
     system(cmd);
+    printf("%d\n", current_pid);
+    
+    // 找出目标容器中的一个进程ID
+    int pid_list[4096];
+    int pid_cnt = get_container_processes_id(args->container_name, pid_list);
+    if (pid_cnt <= 0) {
+        log_error("failed to get container process list");
+        return -1;
+    }
+    int one_pid = pid_list[0];
+
+    //设置当前主进程的命名空间    
+    //CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWIPC
+    char ns_file[1024];
+    char *ns_typs[] = {"ipc", "uts", "net", "pid", "mnt", NULL}; 
+    for (int i = 0; ns_typs[i] != NULL; i++) {
+        // /proc/25032/ns/
+        strcpy(ns_file, ""); //清空字符串
+        sprintf(ns_file, "/proc/%d/ns/%s", one_pid, ns_typs[i]);
+        int fd = open(ns_file, O_RDONLY | O_CLOEXEC);
+        if (fd == -1 || setns(fd, 0) == -1) { // Join that namespace 
+            log_error("failed to join current process to destinct %s ns", ns_typs[i]);
+            exit(-1);
+        }
+        close(fd);
+    }
+    
+    int pid = fork();
+    if (pid < 0) {
+        log_error("failed to create subprocess");
+        exit(1);
+    } else if (pid == 0) { //子进程
+        printf("run %s\n", args->container_argv[0]);
+        if (execv(args->container_argv[0], args->container_argv) == -1) {  //Execute a command in namespace 
+            log_error("failed to run cmd: %s", args->container_argv[0]);
+        }
+        exit(0);
+    } else { // 父进程
+        log_info("docker exec waiting user command to finish now, user cmd pid=%d", pid);
+        waitpid(pid, NULL, 0);  // 等待子进程结束
+        log_info("docker exec finished");
+    }
+
+    return 0;
 }

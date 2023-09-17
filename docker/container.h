@@ -32,4 +32,6 @@ int docker_ps(struct docker_ps_arguments *args);
 
 int docker_top(struct docker_top_arguments *args);
 
+int docker_exec(struct docker_exec_arguments *args);
+
 #endif

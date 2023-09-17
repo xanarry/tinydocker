@@ -1,24 +1,46 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <string.h>
 #include <errno.h>
 #include "../util/utils.h"
 #include "../logger/log.h"
 
+#define CGROUP_ROOT "/sys/fs/cgroup"
 static char *cgroup_base = "/sys/fs/cgroup/system.slice";
 
-int init_cgroup(char *container_name, char *cgroup_path) {
+int get_container_cgroup_path(char *container_name, char *cgroup_path) {
     if (!path_exist(cgroup_base)) {
         log_error("cgroup_base: %s not exists", cgroup_base);
         return -1;
     }
-   
     sprintf(cgroup_path, "%s/cdocker-%s", cgroup_base, container_name);
-    if (path_exist(cgroup_path)) {
+    return 0;
+}
+
+int write_pid_to_cgroup_procs(int pid, char *cgroup_procs_path) {    
+    int fd = open(cgroup_procs_path, O_WRONLY|O_APPEND);
+    if (fd < 0) {
+        log_error("failed to open cgroup file: %s", cgroup_procs_path);
+        return -1;
+    }
+
+    char pid_str[100] = {0};
+    sprintf(pid_str, "%d\n", pid);
+    int ret = write(fd, pid_str, strlen(pid_str));
+    close(fd);
+    return ret < 0 ? -1 : 0;
+}
+
+int init_cgroup(char *container_name) {
+    char cgroup_path[128] = {0};
+    // cgroup已经存在
+    if (get_container_cgroup_path(container_name, cgroup_path) != -1 && path_exist(cgroup_path)) {
         return 0;
     }
+    log_info("creating cgroup at: %s", cgroup_path);
 
     int ret = make_path(cgroup_path);
     if (ret == -1) {
@@ -27,14 +49,20 @@ int init_cgroup(char *container_name, char *cgroup_path) {
     return ret;
 }
 
-int set_mem_limit(char *cgroup_path, int mem_max) {
+int remove_cgroup(char *container_name) {
+    char cgroup_path[128];
+    get_container_cgroup_path(container_name, cgroup_path);
+    return rmdir(cgroup_path);
+}
+
+int set_mem_limit(char *container_name, int mem_max) {
     if (mem_max <= 0) {
         log_error("invalid mem_max value: %d", mem_max);
         return -1;
     }
 
     char memory[256] = {0};
-    sprintf(memory, "%s/%s", cgroup_path, "memory.max");
+    sprintf(memory, "%s/cdocker-%s/memory.max", cgroup_base, container_name);
     int fd = open(memory, O_WRONLY|O_TRUNC);
     if (fd == -1) {
         return -1;
@@ -51,14 +79,14 @@ int set_mem_limit(char *cgroup_path, int mem_max) {
 }
 
 
-int set_cpu_limit(char *cgroup_path, int cpu_time) {
+int set_cpu_limit(char *container_name, int cpu_time) {
     if (cpu_time < 1000) {
         log_error("invalid cpu.max value: %d", cpu_time);
         return -1;
     }
 
     char cpu[256] = {0};
-    sprintf(cpu, "%s/%s", cgroup_path, "cpu.max");
+    sprintf(cpu, "%s/cdocker-%s/cpu.max", cgroup_base, container_name);
     int fd = open(cpu, O_WRONLY|O_TRUNC);
     if (fd < 0) {
         log_error("failed to open cgroup file %s, err:%s", cpu, strerror(errno));
@@ -75,14 +103,14 @@ int set_cpu_limit(char *cgroup_path, int cpu_time) {
 }
 
 
-int set_cpuset_limit(char *cgroup_path, char *cpus) {
+int set_cpuset_limit(char *container_name, char *cpus) {
     if (cpus == NULL) {
         log_error("invalid cpuset.cpus value, can not be NULL");
         return -1;
     }
 
     char cpuset_cpus[256] = {0};
-    sprintf(cpuset_cpus, "%s/%s", cgroup_path, "cpuset.cpus");
+    sprintf(cpuset_cpus, "%s/cdocker-%s/cpuset.cpus", cgroup_base, container_name);
     int fd = open(cpuset_cpus, O_WRONLY|O_TRUNC);
     if (fd == -1) {
         return -1;
@@ -97,26 +125,17 @@ int set_cpuset_limit(char *cgroup_path, char *cpus) {
 }
 
 
-int apply_cgroup_limit_to_pid(char *cgroup_path, int pid) {
+int apply_cgroup_limit_to_pid(char *container_name, int pid) {
     char procs[256] = {0};
-    sprintf(procs, "%s/%s", cgroup_path, "cgroup.procs");
-    int fd = open(procs, O_WRONLY|O_APPEND);
-    if (fd < 0) {
-        return fd;
-    }
-
-    char pid_str[100] = {0};
-    sprintf(pid_str, "%d\n", pid);
-    write(fd, pid_str, strlen(pid_str));
-    close(fd);
-    return 0;
+    sprintf(procs, "%s/cdocker-%s/cgroup.procs", cgroup_base, container_name);
+    return write_pid_to_cgroup_procs(pid, procs);
 }
 
 
-int set_cgroup_limits(char *cgroup_path, int cpu, int memory, char *cpuset) {
+int set_cgroup_limits(char *container_name, int cpu, int memory, char *cpuset) {
     //设置内存限制
     if (memory > 0) {
-        if (set_mem_limit(cgroup_path, memory) != 0) {
+        if (set_mem_limit(container_name, memory) != 0) {
             log_error("failed set mem limit in cgroup");
             return -1;
         }
@@ -124,7 +143,7 @@ int set_cgroup_limits(char *cgroup_path, int cpu, int memory, char *cpuset) {
     
     //设置cpu限制
     if (cpu >= 1000) {
-        if (set_cpu_limit(cgroup_path, cpu) != 0) {
+        if (set_cpu_limit(container_name, cpu) != 0) {
             log_error("failed set cpu limit in cgroup");
             return -1;
         }
@@ -132,7 +151,7 @@ int set_cgroup_limits(char *cgroup_path, int cpu, int memory, char *cpuset) {
 
     //设置cpuset限制
     if (cpuset != NULL) {
-        if (set_cpuset_limit(cgroup_path, cpuset) != 0) {
+        if (set_cpuset_limit(container_name, cpuset) != 0) {
             log_error("failed set cpu set in cgroup");
             return -1;
         }
@@ -141,7 +160,7 @@ int set_cgroup_limits(char *cgroup_path, int cpu, int memory, char *cpuset) {
     return 0;
 }
 
-int get_container_processes_id(char *container_name, char *pid_list) {
+int get_container_processes_id(char *container_name, int *pid_list) {
     char cgroup_procs_path[1024] = {0};
     sprintf(cgroup_procs_path, "%s/cdocker-%s/%s", cgroup_base, container_name, "cgroup.procs");
     if (!path_exist(cgroup_procs_path)) {
@@ -156,13 +175,68 @@ int get_container_processes_id(char *container_name, char *pid_list) {
     }
 
     char line[32];
-    strcpy(pid_list, "");  // 清空结果字符串
+    int pid_cnt = 0;
     while (fgets(line, sizeof(line), file)) {
         strtok(line, "\n");  // 去除行尾的换行符
-        strcat(pid_list, line);
-        strcat(pid_list, " ");
+        pid_list[pid_cnt++] = atoi(line); //转为整数
     }
 
     fclose(file);
-    return 0;
+    return pid_cnt;
+}
+
+
+
+int get_cgroup_files(pid_t pid, char *cgroup_files[], int limit) {
+    const int MAX_BUF = 1024;
+    char path[MAX_BUF];
+    snprintf(path, sizeof(path), "/proc/%d/cgroup", pid);
+
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        perror("fopen failed");
+        return -1;
+    }
+
+    int count = 0;
+    char line[MAX_BUF];
+    while (fgets(line, sizeof(line), file) != NULL && count < limit) {
+        char *subsystem = NULL;
+        char *cgroup_path = NULL;
+        char spliter_cnt = 0;
+        int len = strlen(line);
+        for (int i = 0; i < len; i++) {
+            if (line[i] == ':') {
+                spliter_cnt++;
+                line[i] = '\0';
+                if (subsystem == NULL) {
+                    subsystem = line + i + 1;
+                } else {
+                    cgroup_path = line + i + 1;
+                }
+            }
+        }
+        
+        if (spliter_cnt != 2) {
+            continue;
+        }
+
+        char *cgroup_file = malloc(strlen(CGROUP_ROOT) + strlen(subsystem) + strlen(cgroup_path) + 16);
+        if (cgroup_file == NULL) {
+            perror("malloc failed");
+            break;
+        }
+
+        if (strlen(subsystem) > 0) {
+            sprintf(cgroup_file, "%s/%s%s", CGROUP_ROOT, subsystem, cgroup_path);
+        } else {
+            sprintf(cgroup_file, "%s%s", CGROUP_ROOT, cgroup_path);
+        }
+
+        cgroup_file[strcspn(cgroup_file, "\n")] = '\0';
+        cgroup_files[count++] = cgroup_file;
+    }
+
+    fclose(file);
+    return count;
 }

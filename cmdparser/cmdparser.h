@@ -59,13 +59,15 @@ struct docker_top_arguments {
 
 
 struct docker_exec_arguments {
-    //Usage:  docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+    //Usage:  docker exec [OPTIONS] CONTAINER COMMAND [ARG...]
     int detach;
     int interactive;
     int tty;
     int env_cnt;
     struct key_val_pair *env;
-    char *work_dir;
+    char *container_name;
+    int container_argc;
+    char **container_argv; // arg0 arg1 ... arg127
 };
 
 
