@@ -9,15 +9,11 @@
 #include "../logger/log.h"
 
 #define CGROUP_ROOT "/sys/fs/cgroup"
+#define TINYDOCKER_PREFIX "tinydocker"
 static char *cgroup_base = "/sys/fs/cgroup/system.slice";
 
-int get_container_cgroup_path(char *container_name, char *cgroup_path) {
-    if (!path_exist(cgroup_base)) {
-        log_error("cgroup_base: %s not exists", cgroup_base);
-        return -1;
-    }
-    sprintf(cgroup_path, "%s/cdocker-%s", cgroup_base, container_name);
-    return 0;
+void get_container_cgroup_path(char *container_name, char *cgroup_path) {
+    sprintf(cgroup_path, "%s/%s-%s", cgroup_base, TINYDOCKER_PREFIX, container_name);
 }
 
 int write_pid_to_cgroup_procs(int pid, char *cgroup_procs_path) {    
@@ -35,13 +31,14 @@ int write_pid_to_cgroup_procs(int pid, char *cgroup_procs_path) {
 }
 
 int init_cgroup(char *container_name) {
-    char cgroup_path[128] = {0};
-    // cgroup已经存在
-    if (get_container_cgroup_path(container_name, cgroup_path) != -1 && path_exist(cgroup_path)) {
-        return 0;
+    if (!path_exist(cgroup_base)) {
+        log_error("cgroup_base: %s not exists, created it", cgroup_base);
+        make_path(cgroup_base);
     }
-    log_info("creating cgroup at: %s", cgroup_path);
 
+    char cgroup_path[128] = {0};
+    get_container_cgroup_path(container_name, cgroup_path);
+    log_info("creating cgroup at: %s", cgroup_path);
     int ret = make_path(cgroup_path);
     if (ret == -1) {
         log_error("init cgroup error, failed to create %s", cgroup_path);
@@ -62,7 +59,7 @@ int set_mem_limit(char *container_name, int mem_max) {
     }
 
     char memory[256] = {0};
-    sprintf(memory, "%s/cdocker-%s/memory.max", cgroup_base, container_name);
+    sprintf(memory, "%s/%s-%s/memory.max", cgroup_base, TINYDOCKER_PREFIX, container_name);
     int fd = open(memory, O_WRONLY|O_TRUNC);
     if (fd == -1) {
         return -1;
@@ -86,7 +83,7 @@ int set_cpu_limit(char *container_name, int cpu_time) {
     }
 
     char cpu[256] = {0};
-    sprintf(cpu, "%s/cdocker-%s/cpu.max", cgroup_base, container_name);
+    sprintf(cpu, "%s/%s-%s/cpu.max", cgroup_base, TINYDOCKER_PREFIX, container_name);
     int fd = open(cpu, O_WRONLY|O_TRUNC);
     if (fd < 0) {
         log_error("failed to open cgroup file %s, err:%s", cpu, strerror(errno));
@@ -110,7 +107,7 @@ int set_cpuset_limit(char *container_name, char *cpus) {
     }
 
     char cpuset_cpus[256] = {0};
-    sprintf(cpuset_cpus, "%s/cdocker-%s/cpuset.cpus", cgroup_base, container_name);
+    sprintf(cpuset_cpus, "%s/%s-%s/cpuset.cpus", cgroup_base, TINYDOCKER_PREFIX, container_name);
     int fd = open(cpuset_cpus, O_WRONLY|O_TRUNC);
     if (fd == -1) {
         return -1;
@@ -127,7 +124,7 @@ int set_cpuset_limit(char *container_name, char *cpus) {
 
 int apply_cgroup_limit_to_pid(char *container_name, int pid) {
     char procs[256] = {0};
-    sprintf(procs, "%s/cdocker-%s/cgroup.procs", cgroup_base, container_name);
+    sprintf(procs, "%s/%s-%s/cgroup.procs", cgroup_base, TINYDOCKER_PREFIX, container_name);
     return write_pid_to_cgroup_procs(pid, procs);
 }
 
@@ -162,7 +159,7 @@ int set_cgroup_limits(char *container_name, int cpu, int memory, char *cpuset) {
 
 int get_container_processes_id(char *container_name, int *pid_list) {
     char cgroup_procs_path[1024] = {0};
-    sprintf(cgroup_procs_path, "%s/cdocker-%s/%s", cgroup_base, container_name, "cgroup.procs");
+    sprintf(cgroup_procs_path, "%s/%s-%s/%s", cgroup_base, TINYDOCKER_PREFIX, container_name, "cgroup.procs");
     if (!path_exist(cgroup_procs_path)) {
         log_error("can not find container by name: %s", container_name);
         return -1;

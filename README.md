@@ -10,3 +10,4 @@ v6.0            Version 6.0, 支持docker commit, 将容器当前工作状态打
 v7.0            Version 7.0, 支持docker ps, 列出运行容器或者全部容器(参数-a)
 v8.0            Version 8.0, 支持docker top, 列出容器中的全部进程
 v9.0            Version 9.0, 支持docker exec, 添加进程到容器中运行
+v10.0           Version 10.0, 支持docker stop以及docke rm, 运行前检查容器名是否存在

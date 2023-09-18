@@ -5,6 +5,7 @@
 
 
 #define TINYDOCKER_RUNTIME_DIR "/home/xanarry/tinydocker_runtime"
+#define CONTAINER_STATUS_INFO_DIR "/home/xanarry/tinydocker_runtime/container_info"
 
 enum container_status {
     CONTAINER_RUNNING,
@@ -33,5 +34,9 @@ int docker_ps(struct docker_ps_arguments *args);
 int docker_top(struct docker_top_arguments *args);
 
 int docker_exec(struct docker_exec_arguments *args);
+
+int docker_stop(struct docker_stop_arguments *args);
+
+int docker_rm(struct docker_rm_arguments *args);
 
 #endif

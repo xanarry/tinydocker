@@ -224,6 +224,47 @@ void docker_top_cmd_print(struct docker_top_arguments *a) {
     printf("container=%s\n", a->container_name);
 }
 
+
+// ==============================docker stop===========================
+
+//参数说明
+char *docker_stop_doc = "Usage:  docker stop [OPTIONS] CONTAINER [CONTAINER...]";
+
+//参数配置
+struct argp_option docker_stop_option_setting[] = {	
+    { "time",       't', "int > 0", 0, "等待多少秒后发送SIGKILL信号" },
+    { 0 }
+};
+
+//参数解析函数
+static error_t docker_stop_parse_func(int key, char *arg, struct argp_state *state) {
+    struct docker_stop_arguments *arguments = state->input;
+    //printf("key=[%c], arg=[%s], %d, %d\n", key, arg, state->next, state->argc);
+    if (arguments->container_cnt != 0)
+        return 0;
+
+    switch (key) {
+        case 't':
+            arguments->time = atoi(arg);
+            break;
+        case ARGP_KEY_ARG:
+            for (int i = state->next - 1; i < state->argc; i++) {
+                arguments->container_names[arguments->container_cnt++] = state->argv[i];  
+            }
+            arguments->container_names[arguments->container_cnt] = NULL;
+    }
+    return 0;
+}
+
+void docker_stop_cmd_print(struct docker_stop_arguments *a) {
+    printf("container_cnt=%d\n", a->container_cnt);
+    printf("wait_time=%d\n", a->time);
+    for (int i = 0; i < a->container_cnt; i++) {
+        printf("%s\n", a->container_names[i]);
+    }
+}
+
+
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     if (argc < 2) {
         printf("请输入有效的docker命令\n");
@@ -271,7 +312,7 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         return result;
     }
 
-     if (strcmp(action, "ps") == 0) {
+    if (strcmp(action, "ps") == 0) {
        //docker ps -a(可选项)
         struct docker_ps_arguments *arguments = (struct docker_ps_arguments *) malloc(sizeof(struct docker_ps_arguments));
         arguments->list_all = 0;
@@ -319,6 +360,44 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         struct docker_cmd result = {.cmd_type=DOCKER_EXEC, .arguments=arguments};
         return result;
     }
+
+    if (strcmp(action, "stop") == 0) {
+        // tinydocker stop c1 c2 c3 ...
+        if (argc < 3) {
+            printf("Usage:  docker stop [OPTIONS] CONTAINER [CONTAINER...]\n");
+            exit(-1);
+        }
+       
+        struct argp docker_stop_argp = {docker_stop_option_setting, docker_stop_parse_func, docker_stop_doc, NULL};
+        struct docker_stop_arguments *arguments = (struct docker_stop_arguments *) malloc(sizeof(struct docker_stop_arguments));
+        arguments->time = 10;
+        arguments->container_cnt = 0;
+        arguments->container_names = malloc(128 * sizeof(char *));
+        argp_parse(&docker_stop_argp, argc - 1, argv + 1, ARGP_IN_ORDER | ARGP_NO_ERRS, 0, arguments);
+
+        if (arguments->container_cnt == 0 || arguments->time < 0) {
+            print_cmd_help(&docker_stop_argp);
+            exit(-1);
+        }
+    
+        struct docker_cmd result = {.cmd_type=DOCKER_STOP, .arguments=arguments};
+        return result;
+    }
+
+    if (strcmp(action, "rm") == 0) {
+        // tinydocker rm c1
+        if (argc != 3) {
+            printf("Usage:  docker stop [OPTIONS] CONTAINER [CONTAINER...]\n");
+            exit(-1);
+        }
+       
+        struct docker_rm_arguments *arguments = (struct docker_rm_arguments *) malloc(sizeof(struct docker_rm_arguments));
+        arguments->container_name = argv[argc - 1];
+        struct docker_cmd result = {.cmd_type=DOCKER_RM, .arguments=arguments};
+        return result;
+    }
+
+    printf("wrong input command\n");
 }
 
 
@@ -338,6 +417,9 @@ void print_docker_cmds(struct docker_cmd cmds) {
         break;
     case DOCKER_EXEC:
         docker_exec_cmd_print(cmds.arguments);
+        break;
+    case DOCKER_STOP:
+        docker_stop_cmd_print(cmds.arguments);
         break;
     }
 }

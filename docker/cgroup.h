@@ -8,5 +8,6 @@ int set_cgroup_limits(char *container_name, int cpu, int memory, char *cpuset);
 int get_container_processes_id(char *container_name, int *pid_list);
 int write_pid_to_cgroup_procs(int pid, char *cgroup_procs_path);
 int get_cgroup_files(pid_t pid, char *cgroup_files[], int limit);
+void get_container_cgroup_path(char *container_name, char *cgroup_path);
 
 #endif

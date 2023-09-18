@@ -29,6 +29,14 @@ int main(int argc, char **argv)
         print_docker_cmds(result);
         docker_exec(result.arguments);
         break;
+    case DOCKER_STOP:
+        print_docker_cmds(result);
+        docker_stop(result.arguments);
+        break;
+    case DOCKER_RM:
+        print_docker_cmds(result);
+        docker_rm(result.arguments);
+        break;
     }
 
     return 0;

@@ -8,6 +8,7 @@ enum docker_command_type {
     DOCKER_TOP,
     DOCKER_EXEC,
     DOCKER_STOP,
+    DOCKER_RM,
 };
 
 struct key_val_pair {
@@ -54,6 +55,16 @@ struct docker_ps_arguments {
 
 
 struct docker_top_arguments {
+    char *container_name;
+};
+
+struct docker_stop_arguments {
+    int time;
+    int container_cnt;
+    char **container_names; // arg0 arg1 ... arg127
+};
+
+struct docker_rm_arguments {
     char *container_name;
 };
 
