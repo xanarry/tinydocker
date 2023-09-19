@@ -5,13 +5,13 @@
 #include <time.h>
 #include "cmdparser.h"
 
-struct key_val_pair parse_key_val_pair(char *str) {
+struct key_val_pair parse_key_val_pair(char *str, const char *spliter) {
     struct key_val_pair pair = {NULL, NULL};
 
-    char *token = strtok(str, ":");
+    char *token = strtok(str, spliter);
     if (token != NULL) {
         pair.key = token;
-        token = strtok(NULL, ":");
+        token = strtok(NULL, spliter);
         if (token != NULL) {
             pair.val = token;
         }
@@ -46,6 +46,7 @@ struct argp_option docker_run_option_setting[] = {
     { "tty",         't', "false|true", OPTION_ARG_OPTIONAL, "开启tty" },
     { "cpu-shares",  'c', "int_val", 0, "设置cpu限制, 必须大于1000" },
     { "memory",      'm', "int_val", 0, "设置内存限制" },
+    { "env",         'e', "int_val", 0, "环境变量" },
     { 0 }
 };
 
@@ -108,6 +109,9 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
         case 'n':
             arguments->name =arg;
             break;
+        case 'e':
+            arguments->env[arguments->env_cnt++] = parse_key_val_pair(arg, "=");
+            break;
         case ARGP_KEY_ARG:
             arguments->image = arg;
             for (int i = state->next; i < state->argc; i++) {
@@ -136,6 +140,9 @@ void docker_run_cmd_print(struct docker_run_arguments *a) {
     for (int i = 0; i < a->volume_cnt; i++) {
         printf("host_dir:%s, container_dir:%s, ro:%d\n", a->volumes[i].host, a->volumes[i].container, a->volumes[i].ro);
     }
+    for (int i = 0; i < a->env_cnt; i++) {
+        printf("env_key:%s, env_val:%s\n", a->env[i].key, a->env[i].val);
+    }
     printf("args_count=%d\n", a->container_argc);
     for (int i = 0; a->container_argv[i]; i++) {
         printf("%s ", a->container_argv[i]);
@@ -154,7 +161,7 @@ struct argp_option docker_exec_option_setting[] = {
     { "detach",      'd', "false|true", OPTION_ARG_OPTIONAL, "后台运行" },
     { "interactive", 'i', "false|true", OPTION_ARG_OPTIONAL, "开启交互模式" },
     { "tty",         't', "false|true", OPTION_ARG_OPTIONAL, "开启tty" },
-    { "env",         'e', "int_val", 0, "环境变量" },
+    { "env",         'e', "k=v", 0, "环境变量" },
     { 0 }
 };
 
@@ -176,7 +183,7 @@ static error_t docker_exec_parse_func(int key, char *arg, struct argp_state *sta
             arguments->tty = 1;
             break;
         case 'e':
-            arguments->env[arguments->env_cnt++] = parse_key_val_pair(arg);
+            arguments->env[arguments->env_cnt++] = parse_key_val_pair(arg, "=");
             break;
         case ARGP_KEY_ARG:
             arguments->container_name = arg;
@@ -279,6 +286,8 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         arguments->name = malloc(128 * sizeof(char *));
         arguments->cpu = -1;
         arguments->memory = -1;
+        arguments->env_cnt = 0;
+        arguments->env = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair));
         arguments->container_argc = 0;
         arguments->container_argv = malloc(128 * sizeof(char *));
         sprintf(arguments->name, "%ld", time(NULL)); //默认容器名字使用当前的时间戳

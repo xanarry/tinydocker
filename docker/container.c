@@ -49,7 +49,7 @@ int write_container_info(char *container_id, char *image, char *command, int cre
         return 1;
     }
     close(fd);
-    log_info("write container info %s in to %s", content, CONTAINER_STATUS_INFO_DIR);
+    //log_info("write container info \n%s\n in to %s", content, CONTAINER_STATUS_INFO_DIR);
     return 0;
 }
 
@@ -173,11 +173,69 @@ int container_exists(char *container_name) {
     return 0;
 }
 
+char **load_process_env(int pid, struct key_val_pair *user_envs, int user_env_cnt) {
+    const int max_env_cnt = 256 + 1; //多一个放空指针
+    char **envs = (char **) malloc(sizeof(char *) * max_env_cnt); //最多支持max_env_cnt个环境变量
+    int env_idx = 0;
+
+    // 复制父进程的环境变量
+    if (getpid() == pid) {  //获取当前进程自己的环境变量, 直接使用environ变量
+        for (int i = 0; env_idx < max_env_cnt && environ[i] != NULL; i++) {
+            envs[env_idx++] = environ[i];
+        }
+    } else {
+        char path[256];
+        sprintf(path, "/proc/%d/environ", pid);
+        int fd = open(path, O_RDONLY);
+        if (fd < 0) {
+            log_error("failed to open environ file: %s, err:%s", path, strerror(errno));
+            return 0;
+        }
+
+        int buf_size = 4096;
+        char buffer[buf_size];
+        int len = 0;
+        char kv_line[buf_size];
+        int kv_idx = 0;
+        while ((len = read(fd, buffer, buf_size)) > 0) {
+            for (int i = 0; i < len; i++) {
+                if (buffer[i] == '\0') { // envion文件形式为k1=v1\0k2=v2\0, 且一定有\0结尾, 所以这里能访问所有变量
+                    char *kv_pair = (char *) malloc(kv_idx + 2);
+                    strcpy(kv_pair, kv_line);
+                    envs[env_idx++] = kv_pair;
+                    memset(kv_line, 0, buf_size);
+                    kv_idx = 0;
+                } else {
+                    kv_line[kv_idx++] = buffer[i];
+                }
+            }
+            memset(buffer, 0, buf_size);
+        }
+        close(fd);
+    }
+
+    // 复制用户设置的环境变量
+    for (int i = 0; env_idx < max_env_cnt && i < user_env_cnt; i++) {
+        char *key = user_envs[i].key;
+        char *val = user_envs[i].val;
+        char *env_kv = (char *) malloc(10 + strlen(key) + strlen(val));
+        strcpy(env_kv, "");
+        sprintf(env_kv, "%s=%s", key, val);
+        envs[env_idx++] = env_kv;
+    }
+    envs[env_idx] = NULL;
+
+    return envs;
+}
+
 static char child_stack[8 * 1024 * 1024];
 int pipe_fd[2];
 
 int child_fn(void *args) {
     struct docker_run_arguments *run_args = (struct docker_run_arguments *) args;
+    // 为什么放在这个地方, 因为如果pivot_root后如果拿指定进程的环境变量就会报找不到文件了, 因为进入了容器里面, 但这里其实无所谓, 因为是拿当前进程自己的
+    char **envs = load_process_env(getpid(), run_args->env, run_args->env_cnt);
+
     log_info("start init inner process");
     if (init_and_set_new_root(run_args->mountpoint) != 0) {
         log_error("init docker error");
@@ -193,7 +251,8 @@ int child_fn(void *args) {
     //开始运行用户命令
     char **cmds = (char **) run_args->container_argv;
     log_info("start to run %s", cmds[0]);
-    int ret = execv(cmds[0], cmds);
+    int ret = execve(cmds[0], cmds, envs);
+    //int ret = execv(cmds[0], cmds);
     if (ret != 0)
         perror("exec error");
     return 0;
@@ -434,7 +493,11 @@ int docker_exec(struct docker_exec_arguments *args) {
         log_error("failed to get container process list");
         return -1;
     }
+    //默认第一个进程为1号进程, 可能不准, 但是在我们这个简单环境下基本都是它了
     int one_pid = pid_list[0];
+
+    // 记录容器1号进程的环境变量
+    char **envs = load_process_env(one_pid, args->env, args->env_cnt);
 
     //设置当前主进程的命名空间    
     //CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWNET | CLONE_NEWIPC
@@ -459,7 +522,7 @@ int docker_exec(struct docker_exec_arguments *args) {
         exit(1);
     } else if (pid == 0) { //子进程
         printf("run %s\n", args->container_argv[0]);
-        if (execv(args->container_argv[0], args->container_argv) == -1) {  //Execute a command in namespace 
+        if (execve(args->container_argv[0], args->container_argv, envs) == -1) {  //Execute a command in namespace 
             log_error("failed to run cmd: %s", args->container_argv[0]);
         }
         exit(0);
@@ -537,7 +600,7 @@ int docker_rm(struct docker_rm_arguments *args) {
         log_error("failed to load container's status info from %s", container_info_path);
         return -1;
     }
-    
+
     if (strcmp(info.status, "RUNNING") == 0) {
         log_error("can not remove a running container %s", args->container_name);
         return -1;

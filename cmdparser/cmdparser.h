@@ -37,6 +37,8 @@ struct docker_run_arguments {
     int memory;
     char *image;
     char *name;
+    int env_cnt;
+    struct key_val_pair *env;
     int container_argc;
     char **container_argv; // arg0 arg1 ... arg127
     char *mountpoint; //运行时辅助参数
