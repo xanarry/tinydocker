@@ -42,6 +42,7 @@ struct argp_option docker_run_option_setting[] = {
     //{"--长参数", "-缩写参数", '提示值: --file=提示值', "flag", "说明文档" }
     { "volume",      'v', "k:v", 0, "设置卷" },
     { "name",        'n', "str", 0, "容器名字"},
+    { "detach",      'd', "false|true", OPTION_ARG_OPTIONAL, "容器后台运行" },
     { "interactive", 'i', "false|true", OPTION_ARG_OPTIONAL, "开启交互模式" },
     { "tty",         't', "false|true", OPTION_ARG_OPTIONAL, "开启tty" },
     { "cpu-shares",  'c', "int_val", 0, "设置cpu限制, 必须大于1000" },
@@ -100,6 +101,9 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
         case 't':
             arguments->tty = 1;
             break;
+        case 'd':
+            arguments->detach = 1;
+            break;
         case 'c':
             arguments->cpu = atoi(arg);
             break;
@@ -123,6 +127,10 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
 }
 
 int docker_run_cmd_check(struct docker_run_arguments *a) {
+    if (a->detach == 1 && (a->tty == 1 || a->interactive == 1)) {
+        printf("ERROR: -d can not use with -t -i together\n");
+        return 0;
+    }
     if (a->image == NULL || (a->cpu != -1 && a->cpu < 1000) || (a->memory != -1 && a->memory == 0) || a->container_argc < 1) {
         return 0;
     }
@@ -133,6 +141,7 @@ int docker_run_cmd_check(struct docker_run_arguments *a) {
 void docker_run_cmd_print(struct docker_run_arguments *a) {
     printf("interactive=%d\n", a->interactive);
     printf("tty=%d\n", a->tty);
+    printf("detach=%d\n", a->detach);
     printf("cpu=%d\n", a->cpu);
     printf("memory=%d\n", a->memory);
     printf("image=%s\n", a->image);
@@ -271,6 +280,15 @@ void docker_stop_cmd_print(struct docker_stop_arguments *a) {
     }
 }
 
+// ==============================docker rm===========================
+void docker_rm_cmd_print(struct docker_rm_arguments *a) {
+    printf("container_cnt=%d\n", a->container_cnt);
+    for (int i = 0; i < a->container_cnt; i++) {
+        printf("%s\n", a->containers[i]);
+    }
+}
+
+
 
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     if (argc < 2) {
@@ -285,6 +303,9 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         arguments->image = NULL;
         arguments->name = malloc(128 * sizeof(char *));
         arguments->cpu = -1;
+        arguments->detach = 0;
+        arguments->interactive = 0;
+        arguments->tty = 0;
         arguments->memory = -1;
         arguments->env_cnt = 0;
         arguments->env = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair));
@@ -293,7 +314,6 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         sprintf(arguments->name, "%ld", time(NULL)); //默认容器名字使用当前的时间戳
 
         argp_parse(&docker_run_argp, argc - 1, argv + 1, ARGP_IN_ORDER | ARGP_NO_ERRS, 0, arguments);
-        //docker_run_cmd_print(&arguments);
         if (!docker_run_cmd_check(arguments)) {
             print_cmd_help(&docker_run_argp);
             exit(-1);
@@ -394,19 +414,21 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     }
 
     if (strcmp(action, "rm") == 0) {
-        // tinydocker rm c1
-        if (argc != 3) {
+        // tinydocker rm c1 c2 c3
+        if (argc < 3) {
             printf("Usage:  docker stop [OPTIONS] CONTAINER [CONTAINER...]\n");
             exit(-1);
         }
        
         struct docker_rm_arguments *arguments = (struct docker_rm_arguments *) malloc(sizeof(struct docker_rm_arguments));
-        arguments->container_name = argv[argc - 1];
+        arguments->container_cnt = argc - 2;
+        arguments->containers = argv + 2;
         struct docker_cmd result = {.cmd_type=DOCKER_RM, .arguments=arguments};
         return result;
     }
 
     printf("wrong input command\n");
+    exit(-1);
 }
 
 
@@ -429,6 +451,11 @@ void print_docker_cmds(struct docker_cmd cmds) {
         break;
     case DOCKER_STOP:
         docker_stop_cmd_print(cmds.arguments);
+        break;
+    case DOCKER_TOP:
+        break;
+     case DOCKER_RM:
+        docker_rm_cmd_print(cmds.arguments);
         break;
     }
 }

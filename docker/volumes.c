@@ -45,13 +45,17 @@ int mount_volumes(char *mountpoint, int vol_cnt, struct volume_config *vol_confi
 
 
 int umount_volumes(char *mountpoint, int vol_cnt, struct volume_config *vol_config) {
-    // 按顺序挂载目录到容器工作目录
+    // 按顺序卸载挂载到容器中的目录
     char container_dir[1024] = {0};
     for (int i = 0; i < vol_cnt; i++) {
         struct volume_config vol = vol_config[i];
         memset(container_dir, 0, 1024 * sizeof(char));
         // 生成容器目录中的挂载点
-        sprintf(container_dir, "%s/%s", mountpoint, vol.container);
+        if (vol.container[0] == '/') {
+            sprintf(container_dir, "%s%s", mountpoint, vol.container);
+        } else {
+            sprintf(container_dir, "%s/%s", mountpoint, vol.container);
+        }
         // 卸载挂载点
         if (umount(container_dir) == -1) {
             log_error("failed to mount volume from %s to %s", vol.host, vol.container);

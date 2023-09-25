@@ -6,6 +6,7 @@
 
 int main(int argc, char **argv)
 {
+    init_docker_env();
     struct docker_cmd result = parse_docker_cmd(argc, argv);
     switch (result.cmd_type)
     {

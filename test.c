@@ -91,41 +91,106 @@ struct container_info {
 #define CGROUP_ROOT "/sys/fs/cgroup"
 
 
-int main(int argc, char const *argv[])
+
+
+static char child_stack[8 * 1024 * 1024];
+int pipe_fd[2];
+
+extern char **environ;
+int child_fn(void *args) {
+    // //这里阻塞等收到父进程的命令后才开始运行, 为的是等待父进程设置cgroup
+    // close(pipe_fd[1]);
+    // char input_buf[1024] = {0};
+    // int len = read(pipe_fd[0], input_buf, 1024);
+    // close(pipe_fd[0]);
+
+    printf("child start %d\n", getpid());
+
+    char *cmds[] = {"/bin/sh", NULL};
+    int ret = execv(cmds[0], cmds);
+    //int ret = execv(cmds[0], cmds);
+    if (ret != 0)
+        perror("exec error");
+    return 0;
+}
+
+int docker_run() {
+
+    if (pipe(pipe_fd) == -1)
+        return -1;
+/*
+    // 这里不要加CLONE_NEWUSER, 否则会导致pivot_root权限不足, 
+    pid_t child_pid = clone(child_fn, child_stack+(8 * 1024 * 1024), CLONE_NEWPID | CLONE_NEWNS | SIGCHLD, NULL);
+    if (child_pid == -1) {
+        perror("clone subprocess error");
+    }
+    printf("docker process pid= %d \n", child_pid);
+*/
+    int pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return 0;
+    } else if (pid == 0) {
+        child_fn(NULL);
+    } else {
+        printf("docker process pid= %d \n", pid);
+        // //发送任意消息解除子进程的阻塞
+        // close(pipe_fd[0]);  //这里的关闭一定要放在创建子进程后面, 如果放在创建子进程前面, 由于继承关系,直接给子进程的读关闭了
+        // char cmds[] = "start";
+        // if (write(pipe_fd[1], cmds, strlen(cmds)) < 0) {
+        //     perror("write");
+        // }
+        // close(pipe_fd[1]);
+    }
+    return 0;
+}
+
+
+
+int mainx(int argc, char const *argv[])
 {
-        char path[256] = "test.txt";
-        sprintf(path, "/proc/%d/environ", 56440);
+    //docker_run();
+    int pid = fork();
+    if (pid < 0) {
+        perror("fork");
+    } else if (pid == 0) {
+        printf("child start %d\n", getpid());
+        char *cmds[] = {"/bin/sh", NULL};
+        int ret = execv(cmds[0], cmds);
+    } else {
+        printf("docker process pid= %d \n", pid);
+    }
+}
 
-        int fd = open(path, O_RDONLY);
-        if (fd < 0) {
-            perror("Error opening file");
-            return 0;
-        }
-        char *envs[256];
-        int env_idx = 0;
 
-        int buf_size = 10;
-        char buffer[buf_size];
-        int len = 0;
-        char kv_line[4096];
-        int kv_idx = 0;
-        while ((len = read(fd, buffer, buf_size)) > 0) {
-            for (int i = 0; i < len; i++) {
-                if (buffer[i] == '\0') { // envion文件形式为k1=v1\0k2=v2\0, 且一定有\0结尾, 所以这里能访问所有变量
-                    char *kv_pair = (char *) malloc(kv_idx + 2);
-                    strcpy(kv_pair, kv_line);
-                    envs[env_idx++] = kv_pair;
-                    memset(kv_line, 0, 4096);
-                    kv_idx = 0;
-                } else {
-                    kv_line[kv_idx++] = buffer[i];
-                }
-            }
-            memset(buffer, 0, buf_size);
-        }
-        close(fd);
+int mai2n(int argc, char const *argv[])
+{
+    int pid = fork();
+    if (pid < 0) {
+        perror("fork");
+    } else if (pid == 0) {
+        char *cmd[] = {"/bin/sh", NULL};
+        execv(cmd[0], cmd);
+    } else {
+        printf("father wait: %d\n", pid);
+        //wait(NULL);
+    }
+    return 0;
+}
 
-        for (int i = 0; i < env_idx; i++) {
-            printf("%s\0",envs[i]);
-        }
+
+#include <stdlib.h>
+#include <fcntl.h>
+#include <pty.h>
+#include <stdio.h>
+#include <utmp.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+int main() {
+    for (int i = 0; i< 10000; i++) {
+        printf("xxxxsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssxxxxxxsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssxxxxxxsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssxx %d\n", i);
+        sleep(1);
+    }
+    return 0;
 }

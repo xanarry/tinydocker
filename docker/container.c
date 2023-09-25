@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -14,163 +15,85 @@
 #include "container.h"
 #include "volumes.h"
 #include "workspace.h"
-#include <limits.h>
-#include <dirent.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#include "status_info.h"
+
 
 extern char **environ;
 
-int write_container_info(char *container_id, char *image, char *command, int created, enum container_status status, char *name) {
+//初始化docker运行说需要的目录
+int init_docker_env() {
+    if (!path_exist(TINYDOCKER_RUNTIME_DIR)) {
+        make_path(TINYDOCKER_RUNTIME_DIR);
+    }
+
     if (!path_exist(CONTAINER_STATUS_INFO_DIR)) {
         make_path(CONTAINER_STATUS_INFO_DIR);
     }
-    
-    char status_file_path[1024] = {0};
-    sprintf(status_file_path, "%s/%s", CONTAINER_STATUS_INFO_DIR, name);
-    int fd = open(status_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd == -1) {
-        log_error("failed to open file: %s", status_file_path);
-        return 1;
-    }
 
-    char str_created_time[20] = {0};
-    timestamp_to_string(created, str_created_time, 20);
-    char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
-
-    // 使用额外128的缓冲记录结构信息
-    ssize_t size = 128 + strlen(container_id) + strlen(image) + strlen(command) + strlen(str_created_time) + strlen(name);
-    char *content = (char *) malloc(sizeof(char) * size);
-    sprintf(content, "container_id=%s\nimage=%s\ncommand=%s\ncreated=%s\nstatus=%s\nname=%s\n", container_id, image, command, str_created_time, str_status[status], name);
-    
-    if (write(fd, content, strlen(content)) == -1) {
-        perror("Failed to write to file");
-        close(fd);
-        return 1;
+    if (!path_exist(CONTAINER_LOG_DIR)) {
+        make_path(CONTAINER_LOG_DIR);
     }
-    close(fd);
-    //log_info("write container info \n%s\n in to %s", content, CONTAINER_STATUS_INFO_DIR);
     return 0;
 }
-
-int read_container_info(const char *container_info_file, struct container_info *info) {
-    FILE *file = fopen(container_info_file, "r");
-    if (file == NULL) {
-        log_error("failed to open container info file: %s", container_info_file);
-        return -1;
-    }
-
-    char line[1024];
-    while (fgets(line, sizeof(line), file) != NULL) {
-        // Remove newline character from the end of the line
-        line[strcspn(line, "\n")] = '\0';
-
-        // Split the line into key and value
-        char *key = strtok(line, "=");
-        char *value = strtok(NULL, "=");
-
-        if (strcmp(key, "container_id") == 0) {
-            strcpy(info->container_id, value);
-        }
-        if (strcmp(key, "image") == 0) {
-            strcpy(info->image, value);
-        }
-        if (strcmp(key, "command") == 0) {
-            strcpy(info->command, value);
-        }
-        if (strcmp(key, "created") == 0) {
-            strcpy(info->created, value);
-        }
-        if (strcmp(key, "status") == 0) {
-            strcpy(info->status, value);
-        }
-        if (strcmp(key, "name") == 0) {
-            strcpy(info->name, value);
-        }
-    }
-    fclose(file);
-    return 0;
-}
-
-
-int update_container_info(char *container_name, enum container_status status) {
-    char status_file_path[1024] = {0};
-    sprintf(status_file_path, "%s/%s", CONTAINER_STATUS_INFO_DIR, container_name);
-
-    struct container_info info;
-    read_container_info(status_file_path, &info);
-
-    int fd = open(status_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd == -1) {
-        log_error("failed to open file: %s", status_file_path);
-        return 1;
-    }
-
-    char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
-    // 使用额外128的缓冲记录结构信息
-    ssize_t size = 128 + strlen(info.container_id) + strlen(info.image) + strlen(info.command) + strlen(info.created) + strlen(info.name);
-    char *content = (char *) malloc(sizeof(char) * size);
-    sprintf(content, "container_id=%s\nimage=%s\ncommand=%s\ncreated=%s\nstatus=%s\nname=%s\n", info.container_id, info.image, info.command, info.created, str_status[status], info.name);
-    if (write(fd, content, strlen(content)) == -1) {
-        perror("Failed to write to file");
-        close(fd);
-        return 1;
-    }
-
-    close(fd);
-    //log_info("update container info \n%s\n in to %s", content, status_file_path);
-    return 0;
-}
-
-int list_containers_info(struct container_info *container_info_list) {
-    DIR *dir = opendir(CONTAINER_STATUS_INFO_DIR);
-    if (dir == NULL) {
-        log_error("failed to open directory: %s", CONTAINER_STATUS_INFO_DIR);
-        return -1;
-    }
-
-    int container_cnt = 0;
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        // Skip "." and ".." directories
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-
-        // Construct the absolute path of the file
-        char file_path[PATH_MAX];
-        snprintf(file_path, sizeof(file_path), "%s/%s", CONTAINER_STATUS_INFO_DIR, entry->d_name);
-
-        // Check if the entry is a file
-        struct stat file_stat;
-        if (stat(file_path, &file_stat) == 0 && S_ISREG(file_stat.st_mode)) {
-            log_info("load container info from: %s", file_path);
-
-            struct container_info info;
-            int ret = read_container_info(file_path, &info);
-            if (ret == -1) {
-                log_info("failed to load container info from: %s", file_path);
-                continue;
-            }
-            container_info_list[container_cnt++] = info;
-        }
-    }
-
-    closedir(dir);
-    return container_cnt;
-}
-
 
 int container_exists(char *container_name) {
-    // 检查容器是否已经存在, 已经存在就报错
+    //容器状态文件
     char status_path[1024] = {0};
     sprintf(status_path, "%s/container_info/%s", TINYDOCKER_RUNTIME_DIR, container_name);
+    //容器cgroup
     char cgroup_path[1024] = {0};
     get_container_cgroup_path(container_name, cgroup_path);
-    if (path_exist(cgroup_path) || path_exist(status_path)) {
+    //容器工作目录
+    char container_dir[256] = {0};
+    sprintf(container_dir, "%s/containers/%s", TINYDOCKER_RUNTIME_DIR, container_name);
+
+    // 检查容器是否已经存在, 已经存在就报错
+    if (path_exist(cgroup_path) || path_exist(status_path) || path_exist(container_dir)) {
         return 1;
     }
     return 0;
+}
+
+void clean_container_runtime(char *container_name) {
+    if (!container_exists(container_name)) {
+        return;
+    }
+    //删除cgroup文件
+    if (remove_cgroup(container_name) != 0) {
+        log_error("failed remove cgroup: %s", container_name);
+        perror("failed remove cgroup");
+    }
+    log_info("finish clean cgroup %s", container_name);
+
+    //构造挂载点
+    char mountpoint[1024] = {0};
+    sprintf(mountpoint, "%s/containers/%s/mountpoint", TINYDOCKER_RUNTIME_DIR, container_name);
+
+    //umount 挂载的卷
+    struct container_info info;
+    read_container_info(container_name, &info);
+    struct volume_config *volumes = (struct volume_config *) malloc(sizeof(struct volume_config));
+    for (int i = 0; i < info.volume_cnt; i++) { // 解析出挂载的卷列表
+        volumes[i] = parse_volume_config(info.volumes[i]);
+    }
+    umount_volumes(mountpoint, info.volume_cnt, volumes);
+    free(volumes);
+    log_info("finish unmount mounted volumes");
+
+    //umount 容器跟目录挂载点
+    umount(mountpoint);
+    log_info("finish unmount container mountpoint %s", mountpoint);
+
+    //清理容器工作目录
+    char container_dir[256] = {0};
+    sprintf(container_dir, "%s/containers/%s", TINYDOCKER_RUNTIME_DIR, container_name);
+    if (remove_dir(container_dir) == -1) {
+        log_error("clean container %s work dir error", container_dir);
+    }
+    log_info("finish clean container dir: %s", container_dir);
+
+     // 删除状态文件
+    remove_status_info(container_name);
 }
 
 char **load_process_env(int pid, struct key_val_pair *user_envs, int user_env_cnt) {
@@ -233,6 +156,19 @@ int pipe_fd[2];
 
 int child_fn(void *args) {
     struct docker_run_arguments *run_args = (struct docker_run_arguments *) args;
+    //如果容器是后台运行, 将日志日志重定向到指定目录
+    if (run_args->detach) {
+        char log_file_path[128] = {0};
+        sprintf(log_file_path, "%s/%s", CONTAINER_LOG_DIR, run_args->name);
+        log_info("container log file: %s", log_file_path);
+        int fd = open(log_file_path, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC, 0644); // 开启O_SYNC标志, 不要使用缓存
+        if (fd < 0) {
+            log_error("failed to open container log file: %s", log_file_path);
+        }
+        dup2(fd, 1);
+        dup2(fd, 2);
+    }
+
     // 为什么放在这个地方, 因为如果pivot_root后如果拿指定进程的环境变量就会报找不到文件了, 因为进入了容器里面, 但这里其实无所谓, 因为是拿当前进程自己的
     char **envs = load_process_env(getpid(), run_args->env, run_args->env_cnt);
 
@@ -245,14 +181,13 @@ int child_fn(void *args) {
     //这里阻塞等收到父进程的命令后才开始运行, 为的是等待父进程设置cgroup
     close(pipe_fd[1]);
     char input_buf[1024] = {0};
-    int len = read(pipe_fd[0], input_buf, 1024);
+    read(pipe_fd[0], input_buf, 1024);
     close(pipe_fd[0]);
 
     //开始运行用户命令
     char **cmds = (char **) run_args->container_argv;
     log_info("start to run %s", cmds[0]);
     int ret = execve(cmds[0], cmds, envs);
-    //int ret = execv(cmds[0], cmds);
     if (ret != 0)
         perror("exec error");
     return 0;
@@ -299,17 +234,15 @@ int docker_run(struct docker_run_arguments *args) {
     }
     log_info("docker process pid=%d", child_pid);
 
-
-    int now = time(NULL);
-    char container_id[64] = {0};
-    sprintf(container_id, "%d", now);
-    write_container_info(container_id, args->image, args->container_argv[0], now, CONTAINER_RUNNING, args->name);
-
     //应用cgroup限制
     if (apply_cgroup_limit_to_pid(args->name, child_pid) != 0) {
         log_error("failed apply_cgroup_limit_to_pid");
         return -1;
     }
+
+    int start_time = time(NULL);
+    struct container_info info = create_container_info(args, child_pid, CONTAINER_RUNNING, start_time);
+    write_container_info(args->name, &info);
 
     //发送任意消息解除子进程的阻塞
     close(pipe_fd[0]);  //这里的关闭一定要放在创建子进程后面, 如果放在创建子进程前面, 由于继承关系,直接给子进程的读关闭了
@@ -319,37 +252,23 @@ int docker_run(struct docker_run_arguments *args) {
     }
     close(pipe_fd[1]);
 
+    // 如果配置了it任一参数, 等待容器退出
+    if (args->detach == 1) {
+        log_info("leave container process running in background");
+        return 0;
+    }
 
-    if (waitpid(child_pid, NULL, 0) == -1) {
+    int exit_status;
+    if (waitpid(child_pid, &exit_status, 0) == -1) {
         perror("waitpid");
     }
 
-    log_info("container process exit");
-    update_container_info(args->name, CONTAINER_EXITED);
-
-    //删除cgroup文件
-    if (remove_cgroup(args->name) != 0) {
-        log_error("failed remove cgroup: %s", args->name);
-        perror("failed remove cgroup");
+    if (WIFSIGNALED(exit_status)) { //容器进程被信号杀死
+        printf("constainer is killed by signal %d\n", WTERMSIG(exit_status));
+    } else { //正常退出
+        log_info("container process exit");
+        update_container_info(args->name, CONTAINER_EXITED);
     }
-    log_info("finish clean cgroup %s", args->name);
-
-    //umount 挂载的卷
-    umount_volumes(mountpoint, args->volume_cnt, args->volumes);
-    log_info("finish unmount mounted volumes");
-
-    //umount 容器跟目录挂载点
-    umount(mountpoint);
-    log_info("finish unmount container mountpoint %s", mountpoint);
-
-    //清理容器工作目录
-    char container_dir[256] = {0};
-    sprintf(container_dir, "%s/containers/%s", TINYDOCKER_RUNTIME_DIR, args->name);
-    if (remove_dir(container_dir) == -1) {
-        log_error("clean container %s work dir error", container_dir);
-    }
-    log_info("finish clean container dir: %s", container_dir);
-    
     return 0;
 }
 
@@ -380,9 +299,9 @@ int docker_commit(struct docker_commit_arguments *args) {
 
 
 int docker_ps(struct docker_ps_arguments *args) {
-    struct container_info info_list[128];
+    struct container_info *info_list = (struct container_info *) malloc(sizeof(struct container_info) * 128);
     int cnt = list_containers_info(info_list);
-    char *titles[] = {"CONTAINER ID", "IMAGE", "COMMAND", "CREATED", "STATUS", "NAMES", NULL};
+    char *titles[] = {"CONTAINER_ID", "IMAGE", "COMMAND", "CREATED", "STATUS", "NAMES", NULL};
     int spans[6] =   {12,              5,       7,         7,         6,        5}; //记录每个字段输出的最大宽度, 与titles一一对应
     for (int i = 0; i < cnt; i++) {
         if (args->list_all == 0 && strcmp(info_list[i].status, "RUNNING") != 0) {
@@ -415,6 +334,7 @@ int docker_ps(struct docker_ps_arguments *args) {
         printf("%-*s\t%-*s\t%-*s\t%-*s\t%-*s\t%-*s\n", spans[0], info_list[i].container_id, spans[1], info_list[i].image, \
          spans[2], info_list[i].command, spans[3], info_list[i].created, spans[4], info_list[i].status, spans[5], info_list[i].name);
     }
+    return 0;
 }
 
 int docker_top(struct docker_top_arguments *args) {
@@ -567,18 +487,9 @@ int docker_stop(struct docker_stop_arguments *args) {
         }
     }
 
-    //卸载挂载点
-    for (int c = 0; c < args->container_cnt; c++) {
-        char *container_name = args->container_names[c];
-        char mountpoint[1024] = {0};
-        sprintf(mountpoint, "%s/containers/%s/mountpoint", TINYDOCKER_RUNTIME_DIR, container_name);
-        log_info("umount container mountpoint: %s", mountpoint);
-        umount(mountpoint);
-    }
-
-    //将容器状态标记为stoped
-    for (int c = 0; c < args->container_cnt; c++) {
-        char *container_name = args->container_names[c];
+    for (int i = 0; i < args->container_cnt; i++) {
+        char *container_name = args->container_names[i];
+        //将容器状态标记为stoped
         if (update_container_info(container_name, CONTAINER_STOPPED) == -1) {
             log_error("failed to set containter %s status as STOPPED", container_name);
         }
@@ -588,31 +499,26 @@ int docker_stop(struct docker_stop_arguments *args) {
 
 
 int docker_rm(struct docker_rm_arguments *args) {
-     if (!container_exists(args->container_name)) {
-        log_error("container %s not exists", args->container_name);
-        return -1;
+    for (int i = 0; i < args->container_cnt; i++) {
+        char *container_name = args->containers[i];
+        if (!container_exists(container_name)) {
+            log_error("container %s not exists, ignore it", container_name);
+            continue;
+        }
+
+        struct container_info info;
+        if (read_container_info(container_name, &info) == -1) {
+            log_error("failed to load container's status for %s", container_name);
+            return -1;
+        }
+
+        if (strcmp(info.status, "RUNNING") == 0) {
+            log_warn("container %s running, ignore remove", container_name);
+            continue;
+        }
+
+        clean_container_runtime(container_name);
+        log_info("finish clean runtime dir for container: %s", container_name);
     }
-
-    struct container_info info;
-    char container_info_path[512] = {0};
-    sprintf(container_info_path, "%s/%s", CONTAINER_STATUS_INFO_DIR, args->container_name);
-    if (read_container_info(container_info_path, &info) == -1) {
-        log_error("failed to load container's status info from %s", container_info_path);
-        return -1;
-    }
-
-    if (strcmp(info.status, "RUNNING") == 0) {
-        log_error("can not remove a running container %s", args->container_name);
-        return -1;
-    }
-
-    // 删除工作目录
-    char container_dir[1024];
-    sprintf(container_dir, "%s/containers/%s", TINYDOCKER_RUNTIME_DIR, args->container_name);
-    remove_dir(container_dir);
-
-    // 删除状态文件
-    remove(container_info_path);
-
     return 0;
 }

@@ -32,6 +32,7 @@ struct docker_run_arguments {
     int volume_cnt;
     struct volume_config *volumes;
     int interactive;
+    int detach; 
     int tty;
     int cpu;
     int memory;
@@ -67,7 +68,8 @@ struct docker_stop_arguments {
 };
 
 struct docker_rm_arguments {
-    char *container_name;
+    int container_cnt;
+    char **containers;
 };
 
 
@@ -83,7 +85,7 @@ struct docker_exec_arguments {
     char **container_argv; // arg0 arg1 ... arg127
 };
 
-
+struct volume_config parse_volume_config(char* input);
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]);
 void print_docker_cmds(struct docker_cmd);
 
