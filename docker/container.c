@@ -16,6 +16,7 @@
 #include "volumes.h"
 #include "workspace.h"
 #include "status_info.h"
+#include "network.h"
 
 
 extern char **environ;
@@ -32,6 +33,16 @@ int init_docker_env() {
 
     if (!path_exist(CONTAINER_LOG_DIR)) {
         make_path(CONTAINER_LOG_DIR);
+    }
+
+    if (!path_exist(CONTAINER_NETWORK_DIR)) {
+        make_path(CONTAINER_NETWORK_DIR);
+    }
+
+    int r = create_default_bridge();
+    if (r != 0) {
+        log_error("failed to create detault net bridge");
+        exit(-1);
     }
     return 0;
 }

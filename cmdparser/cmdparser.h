@@ -9,6 +9,11 @@ enum docker_command_type {
     DOCKER_EXEC,
     DOCKER_STOP,
     DOCKER_RM,
+    DOCKER_NETWORK_CREATE,
+    DOCKER_NETWORK_LIST,
+    DOCKER_NETWORK_RM,
+    DOCKER_NETWORK_CONNECT,
+    DOCKER_NETWORK_DISCONNECT,
 };
 
 struct key_val_pair {
@@ -84,6 +89,25 @@ struct docker_exec_arguments {
     int container_argc;
     char **container_argv; // arg0 arg1 ... arg127
 };
+
+
+struct docker_network_create {
+    char *name;
+    char *cider;
+};
+
+struct docker_network_rm {
+    int network_argc;
+    char **network_argv; // arg0 arg1 ... arg127
+};
+
+struct docker_network_connect {
+    //Usage:  docker network connect [OPTIONS] NETWORK CONTAINER
+    char *network_name;
+    char *container_name;
+};
+
+
 
 struct volume_config parse_volume_config(char* input);
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]);

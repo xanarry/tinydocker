@@ -289,6 +289,20 @@ void docker_rm_cmd_print(struct docker_rm_arguments *a) {
 }
 
 
+// ==============================docker network rm===========================
+void docker_network_rm_cmd_print(struct docker_network_rm *a) {
+    printf("network_cnt=%d\n", a->network_argc);
+    for (int i = 0; i < a->network_argc; i++) {
+        printf("%s\n", a->network_argv[i]);
+    }
+}
+
+// ==============================docker network create===========================
+void docker_network_create_cmd_print(struct docker_network_create *a) {
+    printf("name=%s\n", a->name);
+    printf("cidr=%s\n", a->cider);
+}
+
 
 struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     if (argc < 2) {
@@ -427,6 +441,42 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         return result;
     }
 
+    if (strcmp(action, "network") == 0) {
+        //docker network create
+        //docker network rm xxx
+        //docker network ls
+
+        if (strcmp(argv[2], "create") == 0) {
+            if (argc != 5) {
+                puts("Usage:  docker network create NETWORK CIDR");
+                exit(-1);
+            }
+            struct docker_network_create *arguments = (struct docker_network_create *) malloc(sizeof(struct docker_network_create));
+            arguments->name = argv[3];
+            arguments->cider = argv[4];
+            struct docker_cmd result = {.cmd_type=DOCKER_NETWORK_LIST, .arguments=arguments};
+            return result;
+        }
+
+        if (strcmp(argv[2], "ls") == 0) {
+            struct docker_cmd result = {.cmd_type=DOCKER_NETWORK_LIST, .arguments=NULL};
+            return result;
+        }
+
+        if (strcmp(argv[2], "rm") == 0) {
+            if (argc < 4) {
+                puts("Usage:  docker network rm NETWORK [NETWORK...]");
+                exit(-1);
+            }
+            struct docker_network_rm *arguments = (struct docker_network_rm *) malloc(sizeof(struct docker_network_rm));
+            arguments->network_argc = argc - 3;
+            arguments->network_argv = argv + 3; 
+            struct docker_cmd result = {.cmd_type=DOCKER_NETWORK_RM, .arguments=arguments};
+            return result;
+        }
+
+    }
+
     printf("wrong input command\n");
     exit(-1);
 }
@@ -454,8 +504,19 @@ void print_docker_cmds(struct docker_cmd cmds) {
         break;
     case DOCKER_TOP:
         break;
-     case DOCKER_RM:
+    case DOCKER_RM:
         docker_rm_cmd_print(cmds.arguments);
         break;
+    case DOCKER_NETWORK_LIST:
+        break;
+    case DOCKER_NETWORK_RM:
+        docker_network_rm_cmd_print(cmds.arguments);
+        break;
+    case DOCKER_NETWORK_CREATE:
+        docker_network_create_cmd_print(cmds.arguments);
+        break;
+    default:
+        puts("now support");
+        exit(-1);
     }
 }

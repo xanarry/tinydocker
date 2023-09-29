@@ -180,17 +180,120 @@ int mai2n(int argc, char const *argv[])
 
 
 #include <stdlib.h>
-#include <fcntl.h>
-#include <pty.h>
 #include <stdio.h>
-#include <utmp.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+
+#include <stdio.h>
+#include <arpa/inet.h>
+
+
+
+#define MAX_IPS 256
+
+int* getUsedIPs(const char* cidr, const char* iplistFile, int* count) {
+    FILE* file = fopen(iplistFile, "r");
+    if (file == NULL) {
+        perror("fopen");
+        exit(1);
+    }
+
+    char line[256];
+    int lineCount = 0;
+    int* usedIPs = malloc(MAX_IPS * sizeof(int));
+    if (usedIPs == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        line[strcspn(line, "\n")] = '\0';
+        char* token = strtok(line, ":");
+        if (strcmp(token, cidr) == 0) {
+            token = strtok(NULL, ":");
+            char* ipToken = strtok(token, ";");
+            while (ipToken != NULL) {
+                usedIPs[lineCount++] = atoi(ipToken);
+                ipToken = strtok(NULL, ";");
+            }
+            break;
+        }
+    }
+
+    fclose(file);
+
+    *count = lineCount;
+    return usedIPs;
+}
+
+unsigned int str_ip_to_int(char *ip) {
+    struct in_addr addr;
+    addr.s_addr = inet_addr(ip);
+    inet_aton(ip, &addr);
+    return addr.s_addr;
+}
+
+char * int_to_str_ip(unsigned int int_ip) {
+    struct in_addr addr;
+    addr.s_addr = int_ip;
+    return inet_ntoa(addr);
+}
+
+
+
+void get_CIDR_range(const char* cidr, unsigned int *minIP, unsigned int *maxIP) {
+    char network[16];
+    int prefix;
+    sscanf(cidr, "%[^/]/%d", network, &prefix);
+
+    unsigned int ip = ntohl(str_ip_to_int(network));
+    unsigned int mask = 0xFFFFFFFF << (32 - prefix);
+
+    *minIP = htonl(ip & mask);
+    *maxIP = htonl(ip | (~mask));
+}
 
 int main() {
-    for (int i = 0; i< 10000; i++) {
-        printf("xxxxsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssxxxxxxsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssxxxxxxsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssxx %d\n", i);
-        sleep(1);
+    char* ip = "177.11.11.5";
+    unsigned uip = str_ip_to_int(ip);
+    printf("%u, %u\n", uip, ntohl(uip));
+    char *sip = int_to_str_ip(uip);
+    printf("%s\n", sip);
+    
+
+    //整数ip转换为ip字符串
+    printf("==========: %u\n", str_ip_to_int("192.168.0.0"));
+
+    const char* cidr = "177.11.11.1/25";
+    unsigned int minIP, maxIP;
+
+    get_CIDR_range(cidr, &minIP, &maxIP);
+
+    printf("CIDR: %s\n", cidr);
+    printf("Min IP: %u, %s\n", minIP, int_to_str_ip(minIP));
+    printf("Max IP: %u, %s\n", maxIP, int_to_str_ip(maxIP));
+
+
+    const char* iplistFile = "iplist.txt";
+    int count = 0;
+    int* usedIPs = getUsedIPs(cidr, iplistFile, &count);
+
+    printf("CIDR: %s\n", cidr);
+    printf("Used IPs:\n");
+    for (int i = 0; i < count; i++) {
+        printf("%d\n", usedIPs[i]);
     }
+
+    free(usedIPs);
+    char bradd_cmd[128] = {0};
+    char *brname = "test";
+    sprintf(bradd_cmd, "if ! brctl show | grep -q \"^%s\"; then brctl addbr \"%s\"; fi", brname, brname);
+    puts(bradd_cmd);
+    int r = system(bradd_cmd);
     return 0;
 }
+/*
+192.168.0.0/23:123;345;657;2321;3234;9
+
+*/
