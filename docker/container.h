@@ -7,13 +7,6 @@
 #define TINYDOCKER_RUNTIME_DIR "/home/xanarry/tinydocker_runtime"
 #define CONTAINER_STATUS_INFO_DIR "/home/xanarry/tinydocker_runtime/container_info"
 #define CONTAINER_LOG_DIR "/home/xanarry/tinydocker_runtime/logs"
-#define CONTAINER_NETWORK_DIR "/home/xanarry/tinydocker_runtime/network"
-
-enum container_status {
-    CONTAINER_RUNNING,
-    CONTAINER_STOPPED,
-    CONTAINER_EXITED
-};
 
 int init_docker_env();
 

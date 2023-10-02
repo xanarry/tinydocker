@@ -12,7 +12,10 @@
 #include "container.h"
 #include "status_info.h"
 
-struct container_info create_container_info(struct docker_run_arguments *args, int pid, enum container_status status, int created_timestamp) {
+
+char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
+
+struct container_info create_container_info(struct docker_run_arguments *args, int pid, enum container_status status, char *ip_addr, int created_timestamp) {
     /*
     int pid; //容器进程ID;
     int detach//
@@ -26,7 +29,6 @@ struct container_info create_container_info(struct docker_run_arguments *args, i
     char volumes[128][1024]; //卷挂载信息
     */
     struct container_info info;
-    char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
 
     info.pid = pid;
     info.detach = args->detach;
@@ -39,6 +41,7 @@ struct container_info create_container_info(struct docker_run_arguments *args, i
     }
     timestamp_to_string(created_timestamp, info.created, 20);
     strcpy(info.status, str_status[status]);
+    strcpy(info.ip_addr, ip_addr);
     strcpy(info.name, args->name);
     info.volume_cnt = args->volume_cnt;
     for (int i = 0; i < args->volume_cnt; i++) {
@@ -70,8 +73,8 @@ int write_container_info(char *container_name, struct container_info *info) {
     int info_max_size = 4096;
     char *content = (char *) malloc(sizeof(char) * info_max_size);
     memset(content, 0, info_max_size);
-    sprintf(content, "pid=%d\ndetach=%d\ncontainer_id=%s\nimage=%s\ncommand=%s\ncreated=%s\nstatus=%s\nname=%s\nvolume_cnt=%d", \
-    info->pid, info->detach, info->container_id, info->image, info->command, info->created, info->status, info->name, info->volume_cnt);
+    sprintf(content, "pid=%d\ndetach=%d\ncontainer_id=%s\nimage=%s\ncommand=%s\ncreated=%s\nstatus=%s\nip_addr=%s\nname=%s\nvolume_cnt=%d", \
+    info->pid, info->detach, info->container_id, info->image, info->command, info->created, info->status, info->ip_addr, info->name, info->volume_cnt);
     for (int i = 0; i < info->volume_cnt; i++) {
         strcat(content, "\n");
         strcat(content, info->volumes[i]);
@@ -134,6 +137,9 @@ int read_container_info(const char *container_name, struct container_info *info)
         if (strcmp(key, "status") == 0) {
             strcpy(info->status, value);
         }
+        if (strcmp(key, "ip_addr") == 0) {
+            strcpy(info->ip_addr, value == NULL ? "" : value);
+        }
         if (strcmp(key, "name") == 0) {
             strcpy(info->name, value);
         }
@@ -149,14 +155,16 @@ int read_container_info(const char *container_name, struct container_info *info)
     return 0;
 }
 
-
-int update_container_info(char *container_name, enum container_status status) {
+int update_container_status(char *container_name, enum container_status status) {
     struct container_info info;
-    read_container_info(container_name, &info);
-    char *str_status[] = {"RUNNING", "STOPPED", "EXITED"};
+    if (read_container_info(container_name, &info) == -1) {
+        log_error("failed load container info for %s", container_name);
+        return -1;
+    }
     strcpy(info.status, str_status[status]);
     return write_container_info(container_name, &info);
 }
+
 
 int list_containers_info(struct container_info *container_info_list) {
     DIR *dir = opendir(CONTAINER_STATUS_INFO_DIR);

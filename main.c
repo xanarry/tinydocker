@@ -8,25 +8,6 @@
 int main(int argc, char **argv)
 {
     init_docker_env();
-    struct network n;
-    read_network_info(TINYDOCKER_DEFAULT_NETWORK, &n);
-    print_network(&n);
-
-    unsigned t = alloc_new_ip(&n);
-    printf("%u\n", t);
-    // delte_network("test3");
-    // puts("ss");
-    // create_network("test3", "172.10.1.0/24", "bridge");
-    // create_network("test30", "172.10.7.0/24", "bridge");
-    // puts("xxx");
-    
-    // puts("===read");
-    // struct network n;
-    // if (read_network_info("test3", &n) == 0) {
-    //     print_network(&n);
-    // }
-    return 0;
-
     struct docker_cmd result = parse_docker_cmd(argc, argv);
     switch (result.cmd_type)
     {

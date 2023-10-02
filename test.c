@@ -227,52 +227,61 @@ int* getUsedIPs(const char* cidr, const char* iplistFile, int* count) {
     return usedIPs;
 }
 
+//IP地址转主机序整数
 unsigned int str_ip_to_int(char *ip) {
     struct in_addr addr;
     addr.s_addr = inet_addr(ip);
     inet_aton(ip, &addr);
-    return addr.s_addr;
+    return ntohl(addr.s_addr);
 }
 
-char * int_to_str_ip(unsigned int int_ip) {
+//主机序列整数转字符串IP
+void int_to_str_ip(unsigned int int_ip, char *ip_buf, int ip_buf_size) {
     struct in_addr addr;
-    addr.s_addr = int_ip;
-    return inet_ntoa(addr);
+    addr.s_addr = htonl(int_ip);
+    inet_ntop(AF_INET, &addr, ip_buf, ip_buf_size);
 }
 
-
-
+//获取IP地址的有效范围
 void get_CIDR_range(const char* cidr, unsigned int *minIP, unsigned int *maxIP) {
     char network[16];
     int prefix;
     sscanf(cidr, "%[^/]/%d", network, &prefix);
 
-    unsigned int ip = ntohl(str_ip_to_int(network));
+    unsigned int ip = str_ip_to_int(network);
     unsigned int mask = 0xFFFFFFFF << (32 - prefix);
 
-    *minIP = htonl(ip & mask);
-    *maxIP = htonl(ip | (~mask));
+    *minIP = ip & mask; //htonl
+    *maxIP = ip | (~mask);
 }
+
+
+
 
 int main() {
     char* ip = "177.11.11.5";
     unsigned uip = str_ip_to_int(ip);
     printf("%u, %u\n", uip, ntohl(uip));
-    char *sip = int_to_str_ip(uip);
-    printf("%s\n", sip);
+    //char *sip = int_to_str_ip(ntohl(723889u));
+    //printf("%s\n", sip);
     
 
     //整数ip转换为ip字符串
     printf("==========: %u\n", str_ip_to_int("192.168.0.0"));
 
-    const char* cidr = "177.11.11.1/25";
+    const char* cidr = "177.11.11.1/16";
     unsigned int minIP, maxIP;
 
     get_CIDR_range(cidr, &minIP, &maxIP);
 
     printf("CIDR: %s\n", cidr);
-    printf("Min IP: %u, %s\n", minIP, int_to_str_ip(minIP));
-    printf("Max IP: %u, %s\n", maxIP, int_to_str_ip(maxIP));
+    //printf("Min IP: %u, %s\n", minIP, int_to_str_ip(minIP));
+    //printf("Max IP: %u, %s\n", maxIP, int_to_str_ip(maxIP));
+    for (unsigned i = minIP; i <= maxIP; i++) {
+        char buf[100];
+        int_to_str_ip(i, buf, 100);
+        printf("%u -> %s\n", i, buf);
+    }
 
 
     const char* iplistFile = "iplist.txt";

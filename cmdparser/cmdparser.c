@@ -313,6 +313,7 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
     if (strcmp(action, "run") == 0) {
         struct argp docker_run_argp = {docker_run_option_setting, docker_run_parse_func, docker_run_doc, NULL};
         struct docker_run_arguments *arguments = (struct docker_run_arguments *) malloc(sizeof(struct docker_run_arguments));
+        arguments->volume_cnt = 0;
         arguments->volumes = (struct volume_config *) malloc(128 * sizeof(struct volume_config));
         arguments->image = NULL;
         arguments->name = malloc(128 * sizeof(char *));

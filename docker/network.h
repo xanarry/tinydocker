@@ -3,6 +3,7 @@
 
 #define TINYDOCKER_DEFAULT_NETWORK "tinydocker-0"
 #define TINYDOCKER_DEFAULT_NETWORK_CIDR "172.11.11.1/24"
+#define CONTAINER_NETWORKS_FILE "/home/xanarry/tinydocker_runtime/networks"
 
 #include "../cmdparser/cmdparser.h"
 
@@ -15,15 +16,14 @@ struct network {
 };
 
 
+int delte_network(char *name);
 int create_default_bridge();
 int create_network(char *name, char *cidr, char *driver);
-int delte_network(char *name);
-int read_network_info(char *name, struct network *nw);
-int get_network_list(struct network *nw_buffer, int bufsize);
-void print_network(struct network *nw);
-unsigned alloc_new_ip(struct network *nw);
+unsigned alloc_new_ip(char *name, char *ip, int buf_size);
 void list_network();
 void remove_docker_network(struct docker_network_rm *cmd);
+int connect_container(char *container_name, char *network, char *ip_addr);
+int disconnect_container(char *container_name, char *network);
 
 
 #endif

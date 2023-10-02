@@ -35,10 +35,6 @@ int init_docker_env() {
         make_path(CONTAINER_LOG_DIR);
     }
 
-    if (!path_exist(CONTAINER_NETWORK_DIR)) {
-        make_path(CONTAINER_NETWORK_DIR);
-    }
-
     int r = create_default_bridge();
     if (r != 0) {
         log_error("failed to create detault net bridge");
@@ -234,7 +230,6 @@ int docker_run(struct docker_run_arguments *args) {
     }
     log_info("set_cgroup_limits cpu=%d, mem=%d", args->cpu, args->memory);
 
-
     if (pipe(pipe_fd) == -1)
         return -1;
 
@@ -247,12 +242,19 @@ int docker_run(struct docker_run_arguments *args) {
 
     //应用cgroup限制
     if (apply_cgroup_limit_to_pid(args->name, child_pid) != 0) {
-        log_error("failed apply_cgroup_limit_to_pid");
+        log_error("failed apply_cgroup_limit_to_pid, container: %s, pid:%d", args->name, child_pid);
         return -1;
     }
 
+    char ip_addr[20] = {0};
+    if (connect_container(args->name, TINYDOCKER_DEFAULT_NETWORK, ip_addr) == -1) {
+        log_warn("failed to connect %s to brige %s, container_pid: %s", args->name, TINYDOCKER_DEFAULT_NETWORK, child_pid);
+        return -1;
+    }
+
+
     int start_time = time(NULL);
-    struct container_info info = create_container_info(args, child_pid, CONTAINER_RUNNING, start_time);
+    struct container_info info = create_container_info(args, child_pid, CONTAINER_RUNNING, ip_addr, start_time);
     write_container_info(args->name, &info);
 
     //发送任意消息解除子进程的阻塞
@@ -278,7 +280,7 @@ int docker_run(struct docker_run_arguments *args) {
         printf("constainer is killed by signal %d\n", WTERMSIG(exit_status));
     } else { //正常退出
         log_info("container process exit");
-        update_container_info(args->name, CONTAINER_EXITED);
+        update_container_status(args->name, CONTAINER_EXITED);
     }
     return 0;
 }
@@ -501,7 +503,7 @@ int docker_stop(struct docker_stop_arguments *args) {
     for (int i = 0; i < args->container_cnt; i++) {
         char *container_name = args->container_names[i];
         //将容器状态标记为stoped
-        if (update_container_info(container_name, CONTAINER_STOPPED) == -1) {
+        if (update_container_status(container_name, CONTAINER_STOPPED) == -1) {
             log_error("failed to set containter %s status as STOPPED", container_name);
         }
     }
