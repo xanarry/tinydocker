@@ -21,6 +21,11 @@ struct key_val_pair {
     char *val;
 };
 
+struct port_map {
+    int host_port;
+    int container_port;
+};
+
 struct volume_config {
     char host[50]; //主机路径
     char container[50]; //容器路径
@@ -38,7 +43,6 @@ struct docker_run_arguments {
     struct volume_config *volumes;
     int interactive;
     int detach; 
-    int tty;
     int cpu;
     int memory;
     char *image;
@@ -48,6 +52,8 @@ struct docker_run_arguments {
     int container_argc;
     char **container_argv; // arg0 arg1 ... arg127
     char *mountpoint; //运行时辅助参数
+    int port_mapping_cnt;
+    struct port_map *port_mapping;
 };
 
 

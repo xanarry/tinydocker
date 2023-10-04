@@ -40,6 +40,13 @@ int init_docker_env() {
         log_error("failed to create detault net bridge");
         exit(-1);
     }
+
+    //添加iptables支持外部响应可以返回到容器内部
+    char iptable_rule[129] = {0}; //创建IP规则
+    sprintf(iptable_rule, "-t nat -A POSTROUTING -s %s -j MASQUERADE", TINYDOCKER_DEFAULT_NETWORK_CIDR);
+    char bash_script[1024] = {0}; //检查规则是否已经存在, 如果规则不存在，添加它
+    sprintf(bash_script, "if ! iptables -C %s 2>/dev/null; then iptables %s; fi", iptable_rule, iptable_rule);
+    system(bash_script);
     return 0;
 }
 
@@ -98,6 +105,12 @@ void clean_container_runtime(char *container_name) {
         log_error("clean container %s work dir error", container_dir);
     }
     log_info("finish clean container dir: %s", container_dir);
+
+    //释放占用的IP地址
+    release_used_ip(TINYDOCKER_DEFAULT_NETWORK_NAME, info.ip_addr);
+
+    //删除端口映射规则
+    unset_container_port_map(info.ip_addr);
 
      // 删除状态文件
     remove_status_info(container_name);
@@ -246,13 +259,17 @@ int docker_run(struct docker_run_arguments *args) {
         return -1;
     }
 
+    //为容器分配IP, 并将容器链接到默认的网桥
     char ip_addr[20] = {0};
-    if (connect_container(args->name, TINYDOCKER_DEFAULT_NETWORK, ip_addr) == -1) {
-        log_warn("failed to connect %s to brige %s, container_pid: %s", args->name, TINYDOCKER_DEFAULT_NETWORK, child_pid);
+    if (connect_container(args->name, TINYDOCKER_DEFAULT_NETWORK_NAME, ip_addr) == -1) {
+        log_warn("failed to connect %s to brige %s, container_pid: %s", args->name, TINYDOCKER_DEFAULT_NETWORK_NAME, child_pid);
         return -1;
     }
 
+    //设置端口映射
+    set_container_port_map(ip_addr, args->port_mapping_cnt, args->port_mapping);
 
+    //记录容器信息
     int start_time = time(NULL);
     struct container_info info = create_container_info(args, child_pid, CONTAINER_RUNNING, ip_addr, start_time);
     write_container_info(args->name, &info);

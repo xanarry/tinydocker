@@ -6,6 +6,7 @@
 #include "network.h"
 #include "cgroup.h"
 #include "status_info.h"
+#include "../cmdparser/cmdparser.h"
 #include "../logger/log.h"
 
 
@@ -172,10 +173,6 @@ int net_has_exist(char *brname) {
     if (system(check_cmd) != 0) {
         return 0;
     }
-    //存在无论如何就启动一把
-    char set_up_cmd[128] = {0};
-    sprintf(set_up_cmd, "ip link set %s up", brname);
-    system(set_up_cmd);
     return 1;
 }
 
@@ -213,12 +210,9 @@ int create_network(char *name, char *cidr, char *driver) {
         return -1;
     }
 
-    //分配新的地址
-    char new_ip[100];
-    alloc_new_ip(nw.name, new_ip, 100);
-
+    //为网桥设置IP地址
     char set_ip_cmd[128] = {0};
-    sprintf(set_ip_cmd, "ip addr add %s/24 dev %s", new_ip, name); //这里要加上网段, 使用cidr模式
+    sprintf(set_ip_cmd, "ip addr add %s dev %s", TINYDOCKER_DEFAULT_IP_ADDR_CIDR, name); //这里使用cidr地址
 
     char start_up[128] = {0};
     sprintf(start_up, "ip link set %s up", name);
@@ -260,11 +254,19 @@ int update_network_info(char *name, struct network *nw) {
 }
 
 int create_default_bridge() {
-    if (net_has_exist(TINYDOCKER_DEFAULT_NETWORK)) {
-        return 0;
+    //如果网桥不存在就创建
+    int ret_val = 0;
+    if (net_has_exist(TINYDOCKER_DEFAULT_NETWORK_NAME) == 0) {
+        log_info("init detail bridge network %s for tinydocker", TINYDOCKER_DEFAULT_NETWORK_NAME);
+        ret_val = create_network(TINYDOCKER_DEFAULT_NETWORK_NAME, TINYDOCKER_DEFAULT_NETWORK_CIDR, "bridge");
     }
-    log_info("init detail bridge network %s for tinydocker", TINYDOCKER_DEFAULT_NETWORK);
-    return create_network(TINYDOCKER_DEFAULT_NETWORK, TINYDOCKER_DEFAULT_NETWORK_CIDR, "bridge");
+
+    //存在无论如何都启动一把
+    char set_up_cmd[128] = {0};
+    sprintf(set_up_cmd, "ip link set %s up", TINYDOCKER_DEFAULT_NETWORK_NAME);
+    system(set_up_cmd);
+
+    return ret_val;
 }
 
 
@@ -294,7 +296,7 @@ unsigned alloc_new_ip(char *name, char *ip, int buf_size) {
     get_CIDR_range(nw.cidr, &minIP, &maxIP);
     //分配IP地址ID时候排除最小的IP和最大的IP和已经被分配的IP
     unsigned int_ip = 0;
-    for (unsigned i = minIP + 1; i < maxIP - 1; i++) {
+    for (unsigned i = minIP + 2; i < maxIP - 1; i++) { //加2开始时为了避免分配主机号0,1和255, 1是这里被设置为网桥地址
         int used = 0;
         for (int j = 0; j < nw.used_ip_cnt; j++) {
             if (i == nw.used_ips[j]) {
@@ -323,7 +325,7 @@ unsigned alloc_new_ip(char *name, char *ip, int buf_size) {
 int release_used_ip(char *name, char *ip) {
     struct network nw;
     if (read_network_info(name, &nw) == -1) {
-        log_error("failed to read newwork info of %s", name);
+        log_error("failed to read network info of %s", name);
         return -1;
     }
 
@@ -431,10 +433,14 @@ int connect_container(char *container_name, char *network, char *ip_addr) {
     char set_container_ifup[128];
     sprintf(set_container_ifup, "nsenter -t %d -n ip link set %s up", one_pid, veth_container);
 
-    
+
+    //设置容器路由
+    char set_route[128] = {0};
+    sprintf(set_route, "nsenter -t %d -n ip route add default via %s dev eth0", one_pid, TINYDOCKER_DEFAULT_GATEWAY);
+        
     //开始执行上述命令
     char *cmds[] = {add_veth_peer, brctl_addif, set_host_peer_up, set_veth_container_into_container, \
-                    add_loif, set_loifup, add_container_addr, set_container_ifup, NULL};
+                    add_loif, set_loifup, add_container_addr, set_container_ifup, set_route, NULL};
 
     for (int i = 0; cmds[i] != NULL; i++) {
         if (system(cmds[i]) != 0) {
@@ -467,4 +473,39 @@ int disconnect_container(char *container_name, char *network) {
         }
     }
     return 0;
+}
+
+
+void set_container_port_map(char *container_ip, int port_cnt, struct port_map *port_maps) {
+    for (int i = 0; i < port_cnt; i++) {
+        int host_port = port_maps[i].host_port;
+        int container_port = port_maps[i].container_port;
+
+        char output_dnat[128] = {0}; //用户本机访问容器的端口转发, 因为PREROUTING只对来自宿主机外部请求起作用
+        sprintf(output_dnat, "iptables -t nat -A OUTPUT -p tcp --dport %d -j DNAT --to-destination %s:%d", host_port, container_ip, container_port);
+        char prerouting_dnat[128] = {0}; //用户外部机器访问host主机时的端口转发
+        sprintf(prerouting_dnat, "iptables -t nat -A PREROUTING -p tcp -m tcp --dport %d -j DNAT --to-destination %s:%d", host_port, container_ip, container_port);
+       
+        char *cmds[] = {output_dnat, prerouting_dnat, NULL};
+        for (int i = 0; cmds[i] != NULL; i++) {
+            int ret = system(cmds[i]);
+            if (ret != 0) {
+                log_error("failed to run %s, ret:%d", cmds[i], ret);
+            }
+        }
+        log_info("set host port %d map to container port %d successful", host_port, container_port);
+    }
+}
+
+void unset_container_port_map(char *container_ip) {
+    char pattern[64] = {0};
+    sprintf(pattern, "DNAT --to-destination %s", container_ip);
+    char bash_script[1024] = {0};
+    sprintf(bash_script, "iptables -t nat -S | grep '%s' | while IFS= read -r rule; do iptables -t nat -D ${rule#\"-A\"}; done", pattern);
+    int ret = system(bash_script);
+    if (ret == 0) {
+        log_info("unset  container port map for container ip %s successful", container_ip);
+    } else {
+        log_info("unset  container port map for container ip %s ret:%d", container_ip, ret);
+    }
 }

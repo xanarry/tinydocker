@@ -40,14 +40,14 @@ char *docker_run_doc = "Usage:  tinydocker run [OPTIONS] IMAGE [COMMAND] [ARG...
 //参数配置
 struct argp_option docker_run_option_setting[] = {	
     //{"--长参数", "-缩写参数", '提示值: --file=提示值', "flag", "说明文档" }
-    { "volume",      'v', "k:v", 0, "设置卷" },
-    { "name",        'n', "str", 0, "容器名字"},
+    { "volume",      'v', "k:v",        0, "设置卷" },
+    { "name",        'n', "str",        0, "容器名字"},
     { "detach",      'd', "false|true", OPTION_ARG_OPTIONAL, "容器后台运行" },
     { "interactive", 'i', "false|true", OPTION_ARG_OPTIONAL, "开启交互模式" },
-    { "tty",         't', "false|true", OPTION_ARG_OPTIONAL, "开启tty" },
-    { "cpu-shares",  'c', "int_val", 0, "设置cpu限制, 必须大于1000" },
-    { "memory",      'm', "int_val", 0, "设置内存限制" },
-    { "env",         'e', "int_val", 0, "环境变量" },
+    { "cpu-shares",  'c', "int_val",    0, "设置cpu限制, 必须大于1000" },
+    { "memory",      'm', "int_val",    0, "设置内存限制" },
+    { "env",         'e', "int_val",    0, "环境变量" },
+    { "port",        'p', "k:v int",        0, "设置端口映射" },
     { 0 }
 };
 
@@ -95,11 +95,16 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
             }
             arguments->volumes[arguments->volume_cnt++] = vol;
             break;
+        case 'p':
+            struct key_val_pair kv = parse_key_val_pair(arg, ":");
+            struct port_map mapping = {
+                .host_port = atoi(kv.key),
+                .container_port = atoi(kv.val)
+            };
+            arguments->port_mapping[arguments->port_mapping_cnt++] = mapping;
+            break;
         case 'i':
             arguments->interactive = 1;
-            break;
-        case 't':
-            arguments->tty = 1;
             break;
         case 'd':
             arguments->detach = 1;
@@ -127,7 +132,7 @@ static error_t docker_run_parse_func(int key, char *arg, struct argp_state *stat
 }
 
 int docker_run_cmd_check(struct docker_run_arguments *a) {
-    if (a->detach == 1 && (a->tty == 1 || a->interactive == 1)) {
+    if (a->detach == 1 && a->interactive == 1) {
         printf("ERROR: -d can not use with -t -i together\n");
         return 0;
     }
@@ -140,7 +145,6 @@ int docker_run_cmd_check(struct docker_run_arguments *a) {
 // 打印命令参数
 void docker_run_cmd_print(struct docker_run_arguments *a) {
     printf("interactive=%d\n", a->interactive);
-    printf("tty=%d\n", a->tty);
     printf("detach=%d\n", a->detach);
     printf("cpu=%d\n", a->cpu);
     printf("memory=%d\n", a->memory);
@@ -155,6 +159,12 @@ void docker_run_cmd_print(struct docker_run_arguments *a) {
     printf("args_count=%d\n", a->container_argc);
     for (int i = 0; a->container_argv[i]; i++) {
         printf("%s ", a->container_argv[i]);
+    }
+    puts("");
+
+    printf("port_mapping=%d\n", a->port_mapping_cnt);
+    for (int i = 0; i < a->port_mapping_cnt; i++) {
+        printf("host:%d->container:%d\n", a->port_mapping[i].host_port, a->port_mapping[i].container_port);
     }
     puts("");
 }
@@ -320,12 +330,13 @@ struct docker_cmd parse_docker_cmd(int argc, char *argv[]) {
         arguments->cpu = -1;
         arguments->detach = 0;
         arguments->interactive = 0;
-        arguments->tty = 0;
         arguments->memory = -1;
         arguments->env_cnt = 0;
         arguments->env = (struct key_val_pair *) malloc(128 * sizeof(struct key_val_pair));
         arguments->container_argc = 0;
         arguments->container_argv = malloc(128 * sizeof(char *));
+        arguments->port_mapping_cnt = 0;
+        arguments->port_mapping = (struct port_map *) malloc(128 * sizeof(struct port_map));
         sprintf(arguments->name, "%ld", time(NULL)); //默认容器名字使用当前的时间戳
 
         argp_parse(&docker_run_argp, argc - 1, argv + 1, ARGP_IN_ORDER | ARGP_NO_ERRS, 0, arguments);

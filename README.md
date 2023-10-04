@@ -12,4 +12,5 @@ v8.0            Version 8.0, 支持docker top, 列出容器中的全部进程
 v9.0            Version 9.0, 支持docker exec, 添加进程到容器中运行
 v10.0           Version 10.0, 支持docker stop以及docke rm, 运行前检查容器名是否存在
 v11.0           Version 11.0, docker run, exec支持传入用户环境变量
-v12.0           Version 12.0, 支持容器后台运行以及日志文件输出, tinydocker没有守护进程, 如果后台进程运行完退回了, 状态无法设置到exited
+v12.0           Version 12.0, 支持容器后台运行以及日志文件输出, tinydocker没有守护进程, 如果后台进程运行完退回了, 状态无法设置到v13.0           Version 13.0, 支持桥接网络, 支持命令docker network create|ls|rm
+v14.0           Version 14.0, 支持端口映射

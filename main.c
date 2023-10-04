@@ -7,6 +7,8 @@
 
 int main(int argc, char **argv)
 {
+    //delte_network(TINYDOCKER_DEFAULT_NETWORK_NAME);
+    //return 0;
     init_docker_env();
     struct docker_cmd result = parse_docker_cmd(argc, argv);
     switch (result.cmd_type)
