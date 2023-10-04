@@ -420,7 +420,9 @@ int docker_exec(struct docker_exec_arguments *args) {
         log_info("cgroup help prcess get message: %s, message_len: %d", read_buf, len);
         //移除父进程的cgroup
         if (len > 0) {
-            if (write_pid_to_cgroup_procs(current_pid, "/sys/fs/cgroup/user.slice/user-1000.slice/session-2.scope/cgroup.procs") == -1) {
+            char procs[128] = {0};
+            sprintf(procs, "%s/%s", cgroup_files[0], "cgroup.procs");
+            if (write_pid_to_cgroup_procs(current_pid, procs) == -1) {
                 log_error("failed to moved out docker exec pid %d from new cgroup setting", current_pid);
             } else {
                 log_info("docker exec pid %d moved out from new cgroup setting", current_pid);

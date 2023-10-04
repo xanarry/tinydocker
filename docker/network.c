@@ -176,7 +176,7 @@ int net_has_exist(char *brname) {
     return 1;
 }
 
-int create_network(char *name, char *cidr, char *driver) {
+int create_network(char *name, char *cidr_network, char *driver) {
     // 暂时只支持网桥
     if (strcmp(driver, "bridge") != 0) {
         return -1;
@@ -191,7 +191,7 @@ int create_network(char *name, char *cidr, char *driver) {
     struct network nw = {
         .name = name,
         .driver = driver,
-        .cidr = cidr,
+        .cidr = cidr_network,
         .used_ips = NULL,
         .used_ip_cnt = 0
     };
@@ -211,8 +211,10 @@ int create_network(char *name, char *cidr, char *driver) {
     }
 
     //为网桥设置IP地址
+    char firs_cidr_ip[32] = {0};
+    get_first_cidr_host_ip(cidr_network, firs_cidr_ip, 32);
     char set_ip_cmd[128] = {0};
-    sprintf(set_ip_cmd, "ip addr add %s dev %s", TINYDOCKER_DEFAULT_IP_ADDR_CIDR, name); //这里使用cidr地址
+    sprintf(set_ip_cmd, "ip addr add %s dev %s", firs_cidr_ip, name); //这里使用cidr地址
 
     char start_up[128] = {0};
     sprintf(start_up, "ip link set %s up", name);
@@ -283,6 +285,20 @@ int delte_network(char *name) {
     return 0;
 }
 
+void get_first_cidr_host_ip(char *cidr_network, char *cidr_host_ip, int size) {
+    unsigned int minIP;
+    unsigned int maxIP;
+    get_CIDR_range(cidr_network, &minIP, &maxIP);
+
+    //获取第一个IP
+    int_to_str_ip(minIP + 1, cidr_host_ip, size); //加1是忽略0号主机
+
+    char buf[16] = {0};
+    int prefix;
+    sscanf(cidr_network, "%[^/]/%d", buf, &prefix);
+    sprintf(buf, "/%d", prefix);
+    strcat(cidr_host_ip, buf);
+}
 
 unsigned alloc_new_ip(char *name, char *ip, int buf_size) {
     struct network nw;

@@ -145,4 +145,4 @@ tinydocker会在*/home/xanarry/tinydocker_runtime*文件夹下创建运行时需
 
 
 ### 设计原理与过程
-参考文件：docker.md
+参考文件：[docker.md](https://github.com/xanarry/tinydocker/blob/main/docker.md)

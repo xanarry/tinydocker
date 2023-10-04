@@ -29,5 +29,6 @@ int connect_container(char *container_name, char *network, char *ip_addr);
 int disconnect_container(char *container_name, char *network);
 void set_container_port_map(char *container_ip, int port_cnt, struct port_map *port_maps);
 void unset_container_port_map(char *container_ip);
+void get_first_cidr_host_ip(char *cidr_network, char *cidr_host_ip, int size);
 
 #endif
