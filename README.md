@@ -68,14 +68,31 @@ c语言实现的一个简单docker, 支持cgroup v2, overlayfs, 桥接网络, �
 
 ### 使用方法
 
-#### 下载编译
+#### 使用说明与下载编译
+tinydocker会在*/home/xanarry/tinydocker_runtime*文件夹下创建运行时需要的目录, 编译前需要先创建*/home/xanarry/*, 或者搜索修改代码中的宏定义
+```c
+#define TINYDOCKER_RUNTIME_DIR "/home/xanarry/tinydocker_runtime"
+#define CONTAINER_STATUS_INFO_DIR "/home/xanarry/tinydocker_runtime/container_info"
+#define CONTAINER_LOG_DIR "/home/xanarry/tinydocker_runtime/logs"
+#define CONTAINER_NETWORKS_FILE "/home/xanarry/tinydocker_runtime/networks"
+```
 
+容器运行会在`/home/xanarry/`生成如下目录和文件：
+```
+./tinydocker_runtime
+├── container_info  # 记录容器信息，每个容器对应里面的一个文件
+├── containers # 保持容器的挂载信息，比如卷挂载和overlayfs信息
+├── images # 容器镜像，一个镜像的tar的hash对应的一个解压后的目录，同一个hash的目录会被多个容器复用，事实上就是overlay fs的只读层
+├── logs # 容器后台运行输入出的日志文件
+└── networks # 这是一个文件， 记录网络和网络IP地址的分配情况
+```
+
+下载编译
 ```
  git@github.com:xanarry/tinydocker.git # 克隆仓库
  cd tinydocker # 进入仓库目录
  make # 编译名为tinydocker的二进制
 ```
-
 
 
 #### 参数说明
@@ -121,3 +138,11 @@ c语言实现的一个简单docker, 支持cgroup v2, overlayfs, 桥接网络, �
 
 `/bin/sh`: 启动容器后运行/bin/sh
 
+运行效果：
+![容器运行](a.png)
+
+![参数检查](b.png)
+
+
+### 设计原理与过程
+参考文件：docker.md
